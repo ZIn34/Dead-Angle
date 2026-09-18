@@ -1803,6 +1803,7 @@
       e.y = clamp(e.y + iy * GLIDE_SPEED * dt, TILE * 2, WORLD_H - TILE * 2);
       e.ang = Math.atan2(iy, ix);
     }
+    if (I.kb && mouse.sx !== undefined && !I.padOn) e.ang = Math.atan2(mouse.wy - e.y, mouse.wx - e.x);
   }
 
   function newRound() {
@@ -2932,10 +2933,11 @@
     } else if (I.touch && sticks.aim) {
       var adx = sticks.aim.x - sticks.aim.ox, ady = sticks.aim.y - sticks.aim.oy;
       if (Math.sqrt(adx * adx + ady * ady) > 10) e.ang = Math.atan2(ady, adx);
+    } else if (I.kb && mouse.sx !== undefined && !I.padOn) {
+      // on keyboard and mouse you always face the cursor, whatever you walk
+      e.ang = Math.atan2(mouse.wy - e.y, mouse.wx - e.x);
     } else if (I.padOn && (ix || iy)) {
       e.ang = Math.atan2(iy, ix);
-    } else if (I.kb && (I.any || !I.padOn)) {
-      e.ang = Math.atan2(mouse.wy - e.y, mouse.wx - e.x);
     }
 
     e.fireT -= dt;
