@@ -3230,6 +3230,14 @@
       lc.x += (tx - lc.x) * lerp;
       lc.y += (ty - lc.y) * lerp;
     }
+    // The camera just moved under a still cursor: re-read where the cursor
+    // is now, so a mouse player faces exactly what is under it this frame.
+    updateMouseWorld();
+    for (var la = 0; la < locals.length; la++) {
+      var LA = locals[la];
+      if (!LA.alive || LA.down || !LA.ctl || !LA.ctl.kb || mouse.sx === undefined || usingPad(LA)) continue;
+      LA.ang = Math.atan2(mouse.wy - LA.y, mouse.wx - LA.x);
+    }
 
     syncHud();
   }
