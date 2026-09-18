@@ -1182,6 +1182,7 @@
   var decals = [], impacts = [], deaths = [], nades = [], flags = [], smokes = [], sectors = [], secTick = 0;
   var zombClock = 0, zombSpawnT = 0;
   var teamNadeT = [0, 0];            // a whole side shares one throwing window
+  var botFrags = 0;                  // thrown by bots this match, for tuning
   var ZOMB_CAP = 14;
 
   function zombiesUp() {
@@ -1500,7 +1501,7 @@
     explored.fill(0);
     ents = []; bullets = []; sounds = []; parts = []; flashes = []; corpses = []; loot = [];
     decals = []; impacts = []; deaths = []; nades = []; flags = []; smokes = []; sectors = []; secTick = 0;
-    teamNadeT = [0, 0];
+    teamNadeT = [0, 0]; botFrags = 0;
     dmgMarks = []; shake = 0; promptItem = null;
     alive = MODE.field; matchTime = 0; shots = 0; hits = 0; kills = 0;
     score = [0, 0]; round = 1; roundBreak = 0; roundClock = 75;
@@ -2169,6 +2170,13 @@
     }
     e.nadeT -= dt;
     e.smokeT -= dt;
+    // Nothing to fight with: run from anyone who does, and from gunfire.
+    // An empty-handed stranger is no threat - keep looting past them.
+    var threat = null;
+    if (dry && !isZombie(e)) {
+      if (e.target && curW(e.target)) threat = e.target;
+      else if (e.alertT > 0 && e.alertShot) threat = { x: e.alertX, y: e.alertY };
+    }
     var reloadRetreat = D.smart && e.reloadT > 0 && e.target && dist(e, e.target) < 420;
     var hurtRetreat = D.smart && e.hp < 34 && e.meds > 0 && e.target && dist(e, e.target) > 260;
 
@@ -2202,9 +2210,32 @@
       footstep(e, dt, true);
     } else if (picking) {
       e.path = null;                     // hold position until they are up
-    } else if ((dry || reloadRetreat || hurtRetreat) && e.target) {
-      // back off - empty, reloading, or patching up
-      var fspeed = dry ? 254 : 200;
+    } else if (threat) {
+      // Pick somewhere well away from the danger and sprint for it. Running in
+      // a straight line away just pins them against the nearest wall.
+      if (!e.path || e.pathI >= e.path.length || e.repathT <= 0) {
+        var here = dist(e, threat), bestT = null, bestS = -1e9;
+        for (var ft = 0; ft < 18; ft++) {
+          var cand = floorTiles[rnd(floorTiles.length)];
+          var cx5 = cand.x * TILE, cy5 = cand.y * TILE;
+          var dT = Math.sqrt((cx5 - threat.x) * (cx5 - threat.x) + (cy5 - threat.y) * (cy5 - threat.y));
+          var dM = Math.sqrt((cx5 - e.x) * (cx5 - e.x) + (cy5 - e.y) * (cy5 - e.y));
+          if (dT < here + 120 || dM > 900) continue;
+          var sc5 = dT - dM * 0.35;
+          if (sc5 > bestS) { bestS = sc5; bestT = cand; }
+        }
+        if (bestT) pathTo(e, bestT.x * TILE, bestT.y * TILE, 1.1);
+        else e.repathT = 0.3;
+      }
+      if (!followPath(e, dt, 254)) {
+        // no route yet: at least get out of the line of fire
+        var tdx = e.x - threat.x, tdy = e.y - threat.y, tl = Math.sqrt(tdx * tdx + tdy * tdy) || 1;
+        moveEnt(e, tdx / tl * 254 * dt, tdy / tl * 254 * dt);
+      }
+      footstep(e, dt, true);
+    } else if ((reloadRetreat || hurtRetreat) && e.target) {
+      // back off - reloading, or patching up
+      var fspeed = 200;
       var fdx = e.x - e.target.x, fdy = e.y - e.target.y;
       var fl = Math.sqrt(fdx * fdx + fdy * fdy) || 1;
       var bx0 = e.x, by0 = e.y;
@@ -2214,7 +2245,7 @@
         moveEnt(e, -fdy / fl * fspeed * dt * e.strafe, fdx / fl * fspeed * dt * e.strafe);
         e.strafe *= -1;
       }
-      footstep(e, dt, dry);
+      footstep(e, dt, false);
       if (hurtRetreat && !lineClear(e.x, e.y, e.target.x, e.target.y)) useMed(e);
     } else if (dry) {
       if (!e.lootGoal || e.repathT <= 0 || loot.indexOf(e.lootGoal) < 0) {
@@ -2343,7 +2374,8 @@
       var gt = e.target;                      // something they can see, not a rumour
       if (gt) {
         var gd = dist(e, gt);
-        if (gd > 140 && gd < 330 && lineClear(e.x, e.y, gt.x, gt.y)) {
+        var recently = gt.fragAt !== undefined && matchTime - gt.fragAt < 10;
+        if (!recently && gd > 140 && gd < 330 && lineClear(e.x, e.y, gt.x, gt.y)) {
           var clear = true;
           for (var fq = 0; fq < ents.length; fq++) {
             var fm = ents[fq];
@@ -2353,8 +2385,10 @@
           if (clear) {
             var ga3 = Math.atan2(gt.y - e.y, gt.x - e.x) + rr(-0.09, 0.09);
             throwNade(e, 'frag', ga3, throwPower(gd));
-            e.nadeT = rr(D.smart ? 16 : 30, D.smart ? 34 : 55);
-            teamNadeT[e.team] = rr(5, 9);
+            gt.fragAt = matchTime;             // nobody else frags them for a while
+            botFrags++;
+            e.nadeT = rr(D.smart ? 12 : 22, D.smart ? 24 : 40);
+            teamNadeT[e.team] = rr(6, 10);
             e.fireT = Math.max(e.fireT, 0.45);
           }
         }
@@ -2421,7 +2455,8 @@
       var angW = Math.atan2(tt.r + 3, Math.max(1, dd));
       var tol = Math.max(angW * 1.7, D.aimTol * 0.55);
       if (dd < maxRange && Math.abs(diff) < tol && sightClear(e.x, e.y, tt.x, tt.y)) {
-        if (slot.ammo <= 0) startReload(e);
+        if (slot.ammo <= 0 && e.reserve <= 0) { if (dd < 38) melee(e); }
+        else if (slot.ammo <= 0) startReload(e);
         else {
           if (e.burst <= 0) e.burst = w.pellets > 1 ? 1 : (w.interval < 0.12 ? 6 + rnd(6) : 3 + rnd(3));
           fire(e);
@@ -2607,6 +2642,7 @@
             var err = 60 * (1.6 - ear);
             e.alertX = s.x + rr(-err, err); e.alertY = s.y + rr(-err, err);
             e.alertT = s.kind === 'shot' ? 7 : 4;
+            e.alertShot = s.kind === 'shot';
             e.path = null; e.repathT = 0;
           }
         }
@@ -3231,7 +3267,7 @@
         }
       }
       return {
-        mode: mode, live: live, armed: armed, withTarget: withTarget,
+        mode: mode, live: live, armed: armed, withTarget: withTarget, botFrags: botFrags,
         minEnemyDist: Math.round(minEnemy), bullets: bullets.length,
         sounds: sounds.length, shotsByPlayer: shots,
         sight: DIFF[difficulty].sight, mapW: MAP_W
