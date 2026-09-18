@@ -1,0 +1,18 @@
+# working files from the asset pipeline, not the game itself
+sfx/
+pack/
+ct.png
+ct2.png
+compose_test.png
+pack_geom.json
+
+# python
+__pycache__/
+*.pyc
+
+# editors / os
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,339 @@
+<title>Dead Angle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --void:#04060a;
+  --ink:#0a0f16;
+  --slate:#18212e;
+  --line:#2c3d52;
+  --dim:#5d7288;
+  --text:#c6d4e3;
+  --cyan:#7ce7d8;
+  --amber:#ffc95e;
+  --ember:#ff7a4d;
+  --rose:#ff4d8d;
+  --font-d:"Chakra Petch","Trebuchet MS",sans-serif;
+  --font-m:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--void);color:var(--text);font-family:var(--font-d);overflow:hidden;-webkit-font-smoothing:antialiased}
+#app{position:relative;width:100%;height:100%;overflow:hidden;background:var(--void)}
+#c{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+
+/* ---------- HUD ---------- */
+.hud{position:absolute;inset:0;pointer-events:none;font-family:var(--font-m)}
+.hud-top{position:absolute;top:16px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:4px}
+.alive{display:flex;align-items:baseline;gap:8px}
+.alive-n{font-family:var(--font-d);font-weight:700;font-size:34px;line-height:1;color:var(--text);font-variant-numeric:tabular-nums;text-shadow:0 0 18px rgba(124,231,216,.35)}
+.alive-l{font-size:11px;letter-spacing:.28em;color:var(--dim)}
+.zone-line{font-size:11px;letter-spacing:.16em;color:var(--dim);font-variant-numeric:tabular-nums;text-align:center;padding:0 16px}
+.zone-line.hot{color:var(--rose)}
+
+.feed{position:absolute;top:16px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:5px;max-width:min(46vw,300px)}
+.feed div{font-size:10.5px;letter-spacing:.06em;color:var(--dim);background:rgba(10,15,22,.72);border-right:2px solid var(--line);padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.feed div b{color:var(--text);font-weight:500}
+.feed div.you{border-right-color:var(--cyan)}
+.feed div.you b{color:var(--cyan)}
+
+.hud-bot{position:absolute;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+.vit{display:flex;flex-direction:column;gap:7px;min-width:0}
+.hpbar{width:min(34vw,210px);height:6px;background:rgba(44,61,82,.55);overflow:hidden}
+.hpbar i{display:block;height:100%;width:100%;background:var(--cyan);box-shadow:0 0 12px rgba(124,231,216,.5)}
+.hpbar i.low{background:var(--rose);box-shadow:0 0 12px rgba(255,77,141,.55)}
+.hpnum{display:flex;align-items:baseline;gap:5px;font-variant-numeric:tabular-nums}
+.hpnum span{font-family:var(--font-d);font-weight:700;font-size:24px;line-height:1}
+.hpnum em{font-style:normal;font-size:10px;letter-spacing:.2em;color:var(--dim)}
+.meds{display:flex;align-items:center;gap:7px;font-size:10px;letter-spacing:.16em;color:var(--dim)}
+.meds b{font-family:var(--font-d);font-size:13px;color:var(--rose);font-weight:700}
+.meds.none{opacity:.38}
+
+.wep{display:flex;flex-direction:column;align-items:flex-end;gap:6px;position:relative}
+.slots{display:flex;gap:4px}
+.slots span{font-size:9px;letter-spacing:.12em;padding:3px 8px;border:1px solid var(--line);color:var(--dim);background:rgba(10,15,22,.6)}
+.slots span.on{border-color:var(--cyan);color:var(--cyan)}
+.wname{font-size:10.5px;letter-spacing:.22em;color:var(--dim)}
+.wammo{display:flex;align-items:baseline;gap:6px;font-variant-numeric:tabular-nums}
+.wammo span{font-family:var(--font-d);font-weight:700;font-size:30px;line-height:1}
+.wammo em{font-style:normal;font-size:12px;color:var(--dim)}
+.wep.dry .wammo span{color:var(--rose)}
+.rel{position:absolute;right:0;bottom:-9px;width:78px;height:3px;background:rgba(44,61,82,.6)}
+.rel i{display:block;height:100%;width:0;background:var(--amber)}
+
+/* ---------- Screens ---------- */
+.screen{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px 16px;overflow-y:auto;pointer-events:auto;background:radial-gradient(120% 90% at 50% 45%,rgba(4,6,10,.34) 0%,rgba(4,6,10,.88) 62%,rgba(4,6,10,.97) 100%)}
+.panel{width:100%;max-width:600px;display:flex;flex-direction:column;align-items:center;gap:22px;text-align:center}
+
+.brand{display:flex;flex-direction:column;align-items:center;gap:10px}
+h1{margin:0;font-size:clamp(32px,9.5vw,62px);font-weight:700;letter-spacing:.22em;text-indent:.22em;line-height:.94;color:#eaf4ff;text-shadow:0 0 42px rgba(124,231,216,.28),0 0 90px rgba(255,77,141,.16)}
+.rule{width:96px;height:2px;background:linear-gradient(90deg,transparent,var(--rose),transparent)}
+.tag{font-family:var(--font-m);font-size:11px;letter-spacing:.3em;color:var(--dim);text-transform:uppercase}
+.premise{margin:0;max-width:48ch;font-size:14.5px;line-height:1.6;color:#9db0c4;text-wrap:balance}
+.premise b{color:var(--text);font-weight:600}
+
+.legend{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+.legend div{background:var(--ink);padding:9px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-family:var(--font-m);font-size:10px;letter-spacing:.09em}
+.legend s{text-decoration:none;display:flex;align-items:center;gap:8px;color:#a6b8ca}
+.legend i{width:10px;height:10px;border-radius:50%;border:1.5px solid currentColor;flex:none}
+.legend u{text-decoration:none;color:var(--dim);font-variant-numeric:tabular-nums}
+.legend .hd{grid-column:1/-1;justify-content:flex-start;color:var(--dim);letter-spacing:.26em;font-size:9px;padding:7px 12px;background:#070b11}
+
+.picks{display:flex;flex-direction:column;align-items:center;gap:14px;width:100%}
+.pick{display:flex;flex-direction:column;align-items:center;gap:8px}
+.pick>p{margin:0;font-family:var(--font-m);font-size:9.5px;letter-spacing:.26em;color:var(--dim)}
+.row{display:flex;flex-wrap:wrap;justify-content:center;gap:1px;background:var(--line);border:1px solid var(--line)}
+.row button{appearance:none;border:0;background:var(--ink);color:var(--dim);font-family:var(--font-m);font-size:10.5px;letter-spacing:.14em;padding:9px 16px;cursor:pointer;transition:background .14s,color .14s}
+.row button:hover{color:var(--text)}
+.row button[aria-pressed="true"]{background:var(--rose);color:#12040a;font-weight:600}
+.row button:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+.modedesc{margin:0;max-width:46ch;font-family:var(--font-m);font-size:11px;line-height:1.6;color:#8296aa;min-height:2.2em}
+
+.ctrls{display:flex;flex-wrap:wrap;justify-content:center;gap:7px 14px;font-family:var(--font-m);font-size:10.5px;letter-spacing:.09em;color:var(--dim)}
+.ctrls span{display:flex;align-items:center;gap:5px}
+.ctrls kbd{font-family:var(--font-m);font-size:10px;color:var(--text);border:1px solid var(--line);padding:2px 6px;background:var(--ink)}
+
+.go{appearance:none;cursor:pointer;font-family:var(--font-d);font-weight:700;font-size:16px;letter-spacing:.3em;text-indent:.3em;padding:15px 44px;color:#04060a;background:var(--cyan);border:0;box-shadow:0 0 34px rgba(124,231,216,.34);transition:transform .12s,box-shadow .18s}
+.go:hover{transform:translateY(-1px);box-shadow:0 0 52px rgba(124,231,216,.5)}
+.go:active{transform:translateY(0)}
+.go:focus-visible{outline:2px solid var(--rose);outline-offset:3px}
+.go.ghost{background:transparent;color:var(--dim);border:1px solid var(--line);box-shadow:none;font-size:13px;padding:13px 32px}
+.go.ghost:hover{color:var(--rose);border-color:var(--rose);transform:none;box-shadow:none}
+.ptitle{margin:0;font-family:var(--font-d);font-weight:700;font-size:clamp(30px,8vw,46px);letter-spacing:.3em;text-indent:.3em;line-height:1;color:#eaf4ff}
+.pbtns{display:flex;flex-direction:column;align-items:center;gap:12px}
+.setlist{width:100%;max-width:440px;display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line)}
+.setrow{background:var(--ink);padding:11px 14px;display:flex;align-items:center;gap:12px;font-family:var(--font-m);font-size:10.5px;letter-spacing:.14em;color:var(--dim)}
+.setrow span{flex:1;text-align:left}
+.setrow b{font-family:var(--font-d);font-size:14px;color:var(--text);min-width:34px;text-align:right;font-variant-numeric:tabular-nums}
+.setrow input[type=range]{flex:0 0 150px;accent-color:var(--cyan);background:transparent}
+.tgl{appearance:none;border:1px solid var(--line);background:var(--ink);color:var(--dim);font-family:var(--font-m);font-size:10px;letter-spacing:.16em;padding:6px 16px;cursor:pointer}
+.tgl.on{border-color:var(--cyan);color:var(--cyan)}
+.screen button:focus,.screen input:focus{outline:2px solid var(--cyan);outline-offset:2px}
+.skincard:focus{outline:2px solid var(--cyan);outline-offset:-2px}
+.shopgrid{width:100%;flex:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(104px,auto);gap:1px;background:var(--line);border:1px solid var(--line)}
+.skincard{background:var(--ink);padding:10px 4px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;transition:background .14s}
+.skincard:hover{background:#101822}
+.skincard canvas{display:block;width:52px;height:78px;flex:none}
+.skincard span{font-family:var(--font-m);font-size:8.5px;letter-spacing:.14em;color:var(--dim)}
+.skincard.on{background:#10201f;box-shadow:inset 0 0 0 1px var(--cyan)}
+.skincard.on span{color:var(--cyan)}
+.skincard.locked canvas{opacity:.82}
+.skincard.locked span{color:var(--amber)}
+@media (max-width:480px){.shopgrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
+.place{display:flex;flex-direction:column;align-items:center;gap:2px}
+.place b{font-family:var(--font-d);font-weight:700;font-size:clamp(50px,15vw,92px);line-height:.9;color:#eaf4ff;font-variant-numeric:tabular-nums}
+.place b.win{color:var(--cyan);text-shadow:0 0 50px rgba(124,231,216,.5)}
+.place s{text-decoration:none;font-family:var(--font-m);font-size:11px;letter-spacing:.3em;color:var(--dim)}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);width:100%;max-width:400px}
+.stats div{background:var(--ink);padding:13px 8px;display:flex;flex-direction:column;gap:5px}
+.stats strong{font-family:var(--font-d);font-size:22px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+.stats span{font-family:var(--font-m);font-size:9.5px;letter-spacing:.2em;color:var(--dim)}
+
+.paused{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(4,6,10,.8);font-family:var(--font-m);font-size:12px;letter-spacing:.34em;color:var(--dim);text-align:center;padding:16px}
+
+@media (max-width:480px){
+  .legend{grid-template-columns:1fr}
+  .hud-bot{gap:10px}
+  .wammo span{font-size:24px}
+  .row button{padding:8px 11px;font-size:10px}
+}
+@media (prefers-reduced-motion:reduce){
+  .go{transition:none}
+}
+</style>
+
+<div id="app">
+  <canvas id="c"></canvas>
+
+  <div class="hud" id="hud" hidden>
+    <div class="hud-top">
+      <div class="alive"><span class="alive-n" id="aliveN">10</span><span class="alive-l" id="aliveL">ALIVE</span></div>
+      <div class="zone-line" id="zoneLine">ZONE HOLDS &middot; 0:26</div>
+    </div>
+    <div class="feed" id="feed"></div>
+    <div class="hud-bot">
+      <div class="vit">
+        <div class="hpbar"><i id="hpFill"></i></div>
+        <div class="hpnum"><span id="hpN">100</span><em>HP</em></div>
+        <div class="meds none" id="medsBox">STIMS <b id="medsN">0</b> <span>F</span></div>
+        <div class="meds none" id="nadesBox">FRAGS <b id="nadesN">0</b> <span>G</span></div>
+        <div class="meds none" id="smokesBox">SMOKE <b id="smokesN">0</b> <span>H</span></div>
+      </div>
+      <div class="wep" id="wepBox">
+        <div class="slots"><span id="slot0">1 &mdash;</span><span id="slot1">2 &mdash;</span></div>
+        <div class="wname" id="wName">UNARMED</div>
+        <div class="wammo"><span id="ammoN">0</span><em id="resN">/ 40</em></div>
+        <div class="rel" id="relBar" hidden><i id="relFill"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="menu">
+    <div class="panel">
+      <div class="brand">
+        <h1>DEAD ANGLE</h1>
+        <div class="rule"></div>
+        <div class="tag">You only see what your eyes reach</div>
+      </div>
+      <p class="premise">The map is dark. Everything you know about anyone else, you know because you <b>heard</b> it &mdash; and every weapon shouts a different distance.</p>
+
+      <div class="legend">
+        <div class="hd">WEAPON NOISE &mdash; HOW FAR EACH SHOT CARRIES</div>
+        <div><s style="color:#ffc95e"><i></i>PISTOL</s><u>900 u</u></div>
+        <div><s style="color:#ff7a4d"><i></i>SHOTGUN</s><u>1700 u</u></div>
+        <div><s style="color:#fff5cd"><i></i>SNIPER</s><u>2000 u</u></div>
+        <div><s style="color:#9db0c4"><i></i>RIFLE</s><u>540 u</u></div>
+        <div><s style="color:#5d7288"><i></i>RELOAD</s><u>340 u</u></div>
+        <div class="hd">YOUR OWN FOOTSTEPS</div>
+        <div><s style="color:#ff7a4d"><i></i>SPRINTING</s><u>520 u</u></div>
+        <div><s style="color:#7ce7d8"><i></i>WALKING</s><u>260 u</u></div>
+      </div>
+
+      <div class="picks">
+        <div class="pick">
+          <p>MODE</p>
+          <div class="row" id="modeRow">
+            <button type="button" data-m="br" aria-pressed="true">BATTLE ROYALE</button>
+            <button type="button" data-m="team" aria-pressed="false">TEAMS 5V5</button>
+            <button type="button" data-m="war" aria-pressed="false">WAR 10V10</button>
+            <button type="button" data-m="ctf" aria-pressed="false">CAPTURE THE FLAG</button>
+            <button type="button" data-m="sect" aria-pressed="false">SECTORS</button>
+            <button type="button" data-m="zomb" aria-pressed="false">INFECTION</button>
+            <button type="button" data-m="duel" aria-pressed="false">1V1</button>
+            <button type="button" data-m="gun" aria-pressed="false">GUN GAME</button>
+          </div>
+        </div>
+        <div class="pick" id="mapPick">
+          <p>MAP</p>
+          <div class="row" id="mapRow">
+            <button type="button" data-p="cqb" aria-pressed="true">CQB</button>
+            <button type="button" data-p="world" aria-pressed="false">WORLD</button>
+          </div>
+        </div>
+        <div class="pick" id="squadPick">
+          <p>SQUAD</p>
+          <div class="row" id="squadRow">
+            <button type="button" data-s="1" aria-pressed="true">SOLO</button>
+            <button type="button" data-s="2" aria-pressed="false">DUOS</button>
+          </div>
+        </div>
+        <div class="pick">
+          <p>LIGHTING</p>
+          <div class="row" id="lightRow">
+            <button type="button" data-l="normal" aria-pressed="true">NORMAL</button>
+            <button type="button" data-l="black" aria-pressed="false">BLACKOUT</button>
+          </div>
+        </div>
+        <div class="pick">
+          <p>OPPOSITION</p>
+          <div class="row" id="diffRow">
+            <button type="button" data-d="0" aria-pressed="false">CALM</button>
+            <button type="button" data-d="1" aria-pressed="true">STANDARD</button>
+            <button type="button" data-d="2" aria-pressed="false">RUTHLESS</button>
+          </div>
+        </div>
+        <p class="modedesc" id="modeDesc"></p>
+      </div>
+
+      <div class="ctrls">
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
+        <span><kbd>CLICK</kbd> fire</span>
+        <span><kbd>E</kbd> pick up</span>
+        <span><kbd>Q</kbd> swap</span>
+        <span><kbd>R</kbd> reload</span>
+        <span><kbd>F</kbd> stim</span>
+        <span><kbd>SHIFT</kbd> sprint &mdash; loud</span>
+      </div>
+      <div class="pbtns">
+        <button class="go" id="startBtn" type="button">DROP IN</button>
+        <button class="go ghost" id="shopBtn" type="button">SKINS &middot; <span id="menuCoins">0</span> CR</button>
+        <button class="go ghost" id="setBtn" type="button">SETTINGS</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="settings" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h2 class="ptitle">SETTINGS</h2>
+        <div class="rule"></div>
+        <div class="tag" id="padTag">no controller detected</div>
+      </div>
+      <div class="setlist">
+        <div class="setrow"><span>MASTER VOLUME</span><input type="range" id="setVol" min="0" max="100" step="1"><b id="setVolV">66</b></div>
+        <div class="setrow"><span>STICK DEADZONE</span><input type="range" id="setDead" min="5" max="40" step="1"><b id="setDeadV">18</b></div>
+        <div class="setrow"><span>AIM ASSIST</span><button class="tgl" id="setAssist" type="button">ON</button></div>
+        <div class="setrow"><span>SCREEN SHAKE</span><button class="tgl" id="setShake" type="button">ON</button></div>
+        <div class="setrow"><span>MINIMAP</span><button class="tgl" id="setMap" type="button">ON</button></div>
+      </div>
+      <p class="modedesc">Left stick moves, right stick aims, <b>RT</b> fires. <b>LT</b> frag, <b>RB</b> smoke, <b>LB</b> sprint, <b>A</b> pick up, <b>B</b> melee, <b>X</b> reload, <b>Y</b> swap weapon, <b>D-pad up</b> stim, <b>Start</b> pauses.</p>
+      <button class="go ghost" id="setBack" type="button">BACK</button>
+    </div>
+  </div>
+
+  <div class="screen" id="shop" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h2 class="ptitle">SKINS</h2>
+        <div class="rule"></div>
+        <div class="tag"><span id="coinsN">0</span> credits &middot; earned by playing</div>
+      </div>
+      <div class="shopgrid" id="shopGrid"></div>
+      <button class="go ghost" id="shopBack" type="button">BACK</button>
+    </div>
+  </div>
+
+  <div class="screen" id="over" hidden>
+    <div class="panel">
+      <div class="place"><b id="placeN">#4</b><s id="placeL">OF 10</s></div>
+      <p class="premise" id="overMsg">Shot in a corridor you never saw the end of.</p>
+      <div class="stats">
+        <div><strong id="stKills">0</strong><span>ELIMS</span></div>
+        <div><strong id="stTime">0:00</strong><span>DURATION</span></div>
+        <div><strong id="stAcc">0%</strong><span>ACCURACY</span></div>
+      </div>
+      <div class="pbtns">
+        <button class="go" id="againBtn" type="button">PLAY AGAIN</button>
+        <button class="go ghost" id="homeBtn" type="button">HOME</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="paused" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h2 class="ptitle">PAUSED</h2>
+        <div class="rule"></div>
+        <div class="tag" id="pauseSub">Battle royale &middot; CQB</div>
+      </div>
+      <div class="pbtns">
+        <button class="go" id="resumeBtn" type="button">RESUME</button>
+        <button class="go ghost" id="leaveBtn" type="button">LEAVE MATCH</button>
+      </div>
+      <p class="modedesc">Esc resumes. Leaving abandons the match and returns to the menu.</p>
+    </div>
+  </div>
+</div>
+
+<script src="game.js"></script>
+<script src="assets/pack-data.js"></script>
+<script src="assets/sfx-data.js"></script>
+<script>
+  // Art. Every sheet is already cut out, so chroma keying stays off — it would
+  // eat the dark pixels of the sprites themselves.
+  EARSHOT.loadPack({
+    data: window.EARSHOT_PACK,
+    skins: 'assets/skins.png',
+    weapons: 'assets/weapons.png',
+    floor: 'assets/floor.png',
+    icons: { med: 'assets/icon_med.png', ammo: 'assets/icon_ammo.png', crate: 'assets/icon_crate.png' }
+  });
+  EARSHOT.loadFx('flash',        { src: 'assets/flash.png',        cols: 8, fps: 46, chroma: false });
+  EARSHOT.loadFx('blood',        { src: 'assets/blood.png',        cols: 8, fps: 20, hold: 11, chroma: false });
+  EARSHOT.loadFx('impact',       { src: 'assets/impact.png',       cols: 3, rows: 3, fps: 30, chroma: false });
+  EARSHOT.loadFx('impact_metal', { src: 'assets/impact_metal.png', cols: 3, rows: 3, fps: 30, chroma: false });
+  EARSHOT.loadFx('death',        { src: 'assets/death_blood.png',  cols: 11, fps: 16, split: 6, poolFps: 9, chroma: false });
+</script>
