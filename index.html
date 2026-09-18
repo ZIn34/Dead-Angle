@@ -49,6 +49,8 @@ body{margin:0;background:var(--void);color:var(--text);font-family:var(--font-d)
 .feed div.you{border-right-color:var(--cyan)}
 .feed div.you b{color:var(--cyan)}
 
+.hud.split .hud-bot{display:none}
+.hud.split .feed{top:58px}
 .hud-bot{position:absolute;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
 .vit{display:flex;flex-direction:column;gap:7px;min-width:0}
 .hpbar{width:min(34vw,210px);height:6px;background:rgba(44,61,82,.55);overflow:hidden}
@@ -231,6 +233,14 @@ h1 .gold{color:var(--gold)}
             <button type="button" data-s="2" aria-pressed="false">DUOS</button>
           </div>
         </div>
+        <div class="pick">
+          <p>PLAYERS</p>
+          <div class="row" id="playersRow">
+            <button type="button" data-n="1" aria-pressed="true">1 PLAYER</button>
+            <button type="button" data-n="2" aria-pressed="false">2P SPLIT SCREEN</button>
+          </div>
+        </div>
+
         <div class="pick">
           <p>LIGHTING</p>
           <div class="row" id="lightRow">

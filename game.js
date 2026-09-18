@@ -261,15 +261,18 @@
   function audioEmit(x, y, def, owner) {
     if (!actx || muted || !player) return;
     if (!def.aud && !def.sample) return;
-    var dx = x - player.x, dy = y - player.y;
+    // heard from your own spot if it is yours, else from the nearer player
+    var oe = owner >= 0 ? ents[owner] : null;
+    var lis = (oe && oe.local) ? oe : nearestLocal(x, y);
+    var dx = x - lis.x, dy = y - lis.y;
     var d = Math.sqrt(dx * dx + dy * dy);
     if (d > def.maxR) return;
-    var mine = owner === player.id;
+    var mine = !!(oe && oe.local);
     var fall = 1 - d / def.maxR;
     var gain = mine ? def.aud.vol * 0.9 : def.aud.vol * fall * fall;
     if (gain < 0.008) return;
     var muffle = 0.22 + 0.78 * fall;
-    if (!mine && d > 4 && !lineClear(player.x, player.y, x, y)) muffle *= 0.4;
+    if (!mine && d > 4 && !lineClear(lis.x, lis.y, x, y)) muffle *= 0.4;
     var when = actx.currentTime + (mine ? 0 : d / def.speed);
     var pan = clamp(dx / 420, -1, 1) * 0.8;
     try {
@@ -1224,6 +1227,43 @@
     }
   }
   var player = null, zone = null;
+  // Everyone playing on this machine. One normally; two in split screen, where
+  // each owns a device and a slice of the screen.
+  var locals = [], splitOn = false, splitWant = false;
+  // The drop plane: a straight run across the map. Everyone rides it at the
+  // start of a battle royale and bails out somewhere along the way.
+  var plane = null;
+  var PLANE_SPEED = 360, GLIDE_SPEED = 235, CHUTE_TIME = 3.2;
+  var VX = 0, VY = 0, VW = 0, VH = 0;       // the viewport being drawn into
+  function anyLocalAlive() {
+    for (var i = 0; i < locals.length; i++) if (locals[i].alive) return true;
+    return false;
+  }
+  function kbPlayer() {
+    for (var i = 0; i < locals.length; i++) if (locals[i].ctl && locals[i].ctl.kb) return locals[i];
+    return player;
+  }
+  function nearestLocal(x, y) {
+    var best = player, bd = 1e18;
+    for (var i = 0; i < locals.length; i++) {
+      var L = locals[i], d = (L.x - x) * (L.x - x) + (L.y - y) * (L.y - y);
+      if (d < bd) { bd = d; best = L; }
+    }
+    return best;
+  }
+  // Which pads to hand out: two pads -> one each; one pad -> P1 keeps the
+  // keyboard and mouse, P2 takes the pad. No pads, no split.
+  function padIndices() {
+    var l = navigator.getGamepads ? navigator.getGamepads() : null, out = [];
+    if (l) for (var i = 0; i < l.length; i++) if (l[i] && l[i].connected) out.push(i);
+    return out;
+  }
+  function splitControls() {
+    var p = padIndices();
+    if (p.length >= 2) return { p1: p[0], p2: p[1] };
+    if (p.length === 1) return { p1: -1, p2: p[0] };
+    return null;
+  }
   var alive = 10, matchTime = 0, shots = 0, hits = 0, kills = 0;
   var score = [0, 0], round = 1, roundBreak = 0, roundClock = 0;
   var result = null, overCause = '';
@@ -1325,6 +1365,7 @@
     if (e === player) { feed('picked up <b>' + WEAPONS[it.key].name + '</b>', true); audioEmit(e.x, e.y, PICK_SND, e.id); }
   }
   function autoPickup(e) {
+    if (isZombie(e)) return;                  // the infected carry nothing
     for (var i = loot.length - 1; i >= 0; i--) {
       var it = loot[i];
       var dx = it.x - e.x, dy = it.y - e.y;
@@ -1481,6 +1522,7 @@
     e.alertT = 0; e.lostT = 0; e.reactT = 0; e.burst = 0; e.holdT = 0;
     e.lootGoal = null; e.lastX = e.x; e.lastY = e.y; e.stuckT = 0;
     giveLoadout(e);
+    if (e.local && e.cam) { e.cam.x = e.x; e.cam.y = e.y; }
     if (e === player) {
       cam.x = e.x; cam.y = e.y;
       mouse.wx = e.x + Math.cos(e.ang) * 100;
@@ -1496,7 +1538,7 @@
     MODE = MODES[mode];
     VIEW_R = blackout ? VIEW_BLACKOUT : VIEW_BASE;
     var FOOTPRINT = {
-      duel: 52, gun: 96, team: 118, war: 156, ctf: 126, sect: 122, zomb: 112, br: 130
+      duel: 52, gun: 96, team: 118, war: 156, ctf: 126, sect: 122, zomb: 112, br: 164
     };
     var span = FOOTPRINT[mode] || 118;
     if (mapKind === 'world') genWorld(span);
@@ -1531,13 +1573,24 @@
     var sp = MODE.teams ? teamSpawns(fieldN)
            : (squad > 1 ? squadSpawns(Math.ceil(fieldN / squad), squad) : pickSpawns(fieldN));
     player = makeEnt(sp[0], true, 'YOU');
+    player.local = true; player.ctl = { any: true, kb: true }; player.cam = cam;
     ents.push(player);
-    for (var i = 1; i < fieldN; i++) ents.push(makeEnt(sp[i % sp.length], false, NAMES[i - 1]));
+    locals = [player]; splitOn = false;
+    var sc = splitWant ? splitControls() : null;
+    if (splitWant && !sc) feed('split screen needs a <b>controller</b> for player 2', true);
+    if (sc) {
+      var p2 = makeEnt(sp[1 % sp.length], true, 'P2');
+      p2.local = true; p2.ctl = { pad: sc.p2, kb: false }; p2.cam = { x: 0, y: 0 }; p2.padPrev = {};
+      player.name = 'P1'; player.ctl = { pad: sc.p1, kb: true }; player.padPrev = {};
+      ents.push(p2); locals.push(p2);
+      splitOn = true;
+    }
+    for (var i = ents.length; i < fieldN; i++) ents.push(makeEnt(sp[i % sp.length], false, NAMES[i - 1]));
     if (MODE.zombies) {
       ents.forEach(function (e, idx) { e.team = 0; e.skin = idx % 16; });
       var seeds = Math.max(3, Math.round(fieldN * 0.22));
       for (var zs = 0; zs < seeds; zs++) {
-        var patient = 1 + rnd(Math.max(1, fieldN - 1));   // never the player
+        var patient = locals.length + rnd(Math.max(1, fieldN - locals.length));   // never a local player
         ents[patient].team = 1;
         ents[patient].skin = ZOMBIE_SKIN;
       }
@@ -1566,6 +1619,8 @@
       ents.forEach(function (e, idx) { e.skin = pool[idx % pool.length]; e.team = idx; });
     }
     player.skin = WALLET.skin;
+    if (splitOn && !MODE.teams && !MODE.zombies && locals[1].skin === player.skin) locals[1].skin = (player.skin + 5) % 16;
+    elHud.classList.toggle('split', splitOn);
     charCache = {};
     ents.forEach(function (e, i) { placeEnt(e, sp[i % sp.length]); });
 
@@ -1592,10 +1647,144 @@
     }
 
     spawnLoot(sp);
+    plane = null;
+    if (mode === 'br') boardPlane();
     elFeed.innerHTML = '';
     elMenu.hidden = true; elOver.hidden = true; elHud.hidden = false; elPaused.hidden = true;
     state = 'play';
     syncHud();
+  }
+
+  function boardPlane() {
+    // a line through the middle third of the map, edge to edge and beyond
+    var a = Math.random() * Math.PI * 2;
+    var dx = Math.cos(a), dy = Math.sin(a);
+    var cx = WORLD_W / 2 + rr(-0.16, 0.16) * WORLD_W, cy = WORLD_H / 2 + rr(-0.16, 0.16) * WORLD_H;
+    var half = Math.max(WORLD_W, WORLD_H) * 0.62;
+    plane = { x0: cx - dx * half, y0: cy - dy * half, dx: dx, dy: dy, len: half * 2, t: 0, x: 0, y: 0 };
+    plane.dur = plane.len / PLANE_SPEED;
+    plane.x = plane.x0; plane.y = plane.y0;
+    // Squads leave together; strangers spread along the whole run. A bot
+    // flying with a person waits for them.
+    var teamAt = {};
+    for (var i = 0; i < ents.length; i++) {
+      var e = ents[i];
+      e.air = 'plane'; e.airT = 0;
+      e.x = plane.x; e.y = plane.y;
+      if (!e.bot) continue;
+      if (teamAt[e.team] === undefined) teamAt[e.team] = rr(0.1, 0.9) * plane.dur;
+      e.dropAt = teamAt[e.team] + rr(0, 0.4);
+      e.follow = false;
+      for (var j = 0; j < locals.length; j++) if (locals[j].team === e.team) e.follow = true;
+    }
+  }
+
+  function jumpOut(e) {
+    if (e.air !== 'plane' || !plane) return;
+    e.air = 'chute'; e.airT = 0;
+    e.x = clamp(plane.x, TILE * 2, WORLD_W - TILE * 2);
+    e.y = clamp(plane.y, TILE * 2, WORLD_H - TILE * 2);
+    e.ang = Math.atan2(plane.dy, plane.dx);
+    if (e.bot) {
+      // pick a spot off to one side of the line to glide for
+      var side = rr(-1, 1) * GLIDE_SPEED * CHUTE_TIME * 0.95, ahead = rr(0, 0.5) * GLIDE_SPEED * CHUTE_TIME;
+      e.landX = clamp(e.x - plane.dy * side + plane.dx * ahead, TILE * 3, WORLD_W - TILE * 3);
+      e.landY = clamp(e.y + plane.dx * side + plane.dy * ahead, TILE * 3, WORLD_H - TILE * 3);
+    }
+    if (e.local) audioEmit(e.x, e.y, PICK_SND, e.id);
+    // a partner bot bails out right behind you
+    if (e.local) for (var i = 0; i < ents.length; i++) {
+      var m = ents[i];
+      if (m.bot && m.air === 'plane' && m.team === e.team) m.dropAt = Math.min(m.dropAt, plane.t + 0.35), m.follow = false;
+    }
+  }
+
+  function land(e) {
+    // down on the nearest open ground
+    var tx = clamp(Math.floor(e.x / TILE), 1, MAP_W - 2), ty = clamp(Math.floor(e.y / TILE), 1, MAP_H - 2);
+    var spot = null;
+    for (var r = 0; r < 40 && !spot; r++) {
+      for (var oy = -r; oy <= r && !spot; oy++) for (var ox = -r; ox <= r; ox++) {
+        if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+        var x = tx + ox, y = ty + oy;
+        if (x < 1 || y < 1 || x >= MAP_W - 1 || y >= MAP_H - 1) continue;
+        if (!isWall(x, y)) { spot = { x: x, y: y }; break; }
+      }
+    }
+    if (spot) { e.x = spot.x * TILE + TILE / 2; e.y = spot.y * TILE + TILE / 2; }
+    e.air = null; e.airT = 0;
+    e.path = null; e.pathI = 0; e.repathT = 0; e.lootGoal = null; e.target = null;
+    e.lastX = e.x; e.lastY = e.y; e.stuckT = 0;
+    spark(e.x, e.y, 6, '210,190,150', 90);
+  }
+
+  function updateDrop(dt) {
+    if (!plane) return;
+    plane.t += dt;
+    var k = Math.min(plane.t, plane.dur) * PLANE_SPEED;
+    plane.x = plane.x0 + plane.dx * k; plane.y = plane.y0 + plane.dy * k;
+    var inWorld = plane.x > TILE * 2 && plane.y > TILE * 2 && plane.x < WORLD_W - TILE * 2 && plane.y < WORLD_H - TILE * 2;
+    var riders = 0;
+    for (var i = 0; i < ents.length; i++) {
+      var e = ents[i];
+      if (!e.alive) continue;
+      if (e.air === 'plane') {
+        e.x = plane.x; e.y = plane.y;
+        var late = plane.t >= plane.dur * 0.93 || (!inWorld && plane.t > plane.dur * 0.5);
+        if (inWorld && (late || (e.bot && !e.follow && plane.t >= e.dropAt))) jumpOut(e);
+        else if (late && !inWorld) {
+          // flew past the edge: tip them out over the last stretch of land
+          plane.x = clamp(plane.x, TILE * 3, WORLD_W - TILE * 3);
+          plane.y = clamp(plane.y, TILE * 3, WORLD_H - TILE * 3);
+          jumpOut(e);
+        }
+        if (e.air === 'plane') riders++;
+      } else if (e.air === 'chute') {
+        e.airT += dt;
+        if (e.bot) {
+          var gx = e.landX - e.x, gy = e.landY - e.y, gl = Math.sqrt(gx * gx + gy * gy);
+          if (gl > 4) {
+            var st = Math.min(gl, GLIDE_SPEED * dt);
+            e.x += gx / gl * st; e.y += gy / gl * st;
+            e.ang = Math.atan2(gy, gx);
+          }
+        }
+        if (e.airT >= CHUTE_TIME) land(e);
+      }
+    }
+    plane.riders = riders;
+    if (plane.t > plane.dur + 2 && !riders) {
+      var still = false;
+      for (i = 0; i < ents.length; i++) if (ents[i].air) { still = true; break; }
+      if (!still) plane = null;
+    }
+  }
+
+  // Your own hands in the air: jump from the plane, then steer the chute.
+  function airControl(e, I, dt) {
+    if (e.air === 'plane') {
+      if (I.pad && I.hit(0)) jumpOut(e);
+      if (I.kb && e.jumpReq) jumpOut(e);
+      e.jumpReq = false;
+      return;
+    }
+    var ix = 0, iy = 0;
+    if (I.pad) { ix = I.ax(0); iy = I.ax(1); }
+    if (!ix && !iy && I.kb) {
+      if (keys['a']) ix -= 1; if (keys['d']) ix += 1;
+      if (keys['w']) iy -= 1; if (keys['s']) iy += 1;
+    }
+    if (!ix && !iy && I.touch && sticks.move) {
+      ix = sticks.move.x - sticks.move.ox; iy = sticks.move.y - sticks.move.oy;
+      if (Math.abs(ix) + Math.abs(iy) < 8) ix = iy = 0;
+    }
+    var l = Math.sqrt(ix * ix + iy * iy);
+    if (l > 0) {
+      ix /= Math.max(1, l); iy /= Math.max(1, l);
+      e.x = clamp(e.x + ix * GLIDE_SPEED * dt, TILE * 2, WORLD_W - TILE * 2);
+      e.y = clamp(e.y + iy * GLIDE_SPEED * dt, TILE * 2, WORLD_H - TILE * 2);
+      e.ang = Math.atan2(iy, ix);
+    }
   }
 
   function newRound() {
@@ -1660,7 +1849,8 @@
       ang: e.ang, t: fdur, max: fdur, tint: w.tint, scale: fscale
     });
     emit(e.x, e.y, w.snd, e.id, 'shot');
-    if (e === player) { shots++; shake = Math.min(shake + (w.pellets > 1 ? 3 : 1.6), 6); }
+    if (e.local) shots++;
+    if (e === player) { shake = Math.min(shake + (w.pellets > 1 ? 3 : 1.6), 6); }
     return true;
   }
   function startReload(e) {
@@ -1681,7 +1871,7 @@
   }
   function throwNade(e, kind, ang, power) {
     var have = kind === 'smoke' ? e.smokes : e.nades;
-    if (have <= 0 || e.useT > 0 || !e.alive || e.down) return;
+    if (have <= 0 || e.useT > 0 || !e.alive || e.down || isZombie(e)) return;
     if (kind === 'smoke') e.smokes--; else e.nades--;
     var a = (ang === undefined) ? e.ang : ang;
     var v = power || 560;
@@ -1726,7 +1916,7 @@
     }
     for (var i = 0; i < ents.length; i++) {
       var e = ents[i];
-      if (!e.alive) continue;
+      if (!e.alive || e.air) continue;
       var d = Math.sqrt((e.x - g.x) * (e.x - g.x) + (e.y - g.y) * (e.y - g.y));
       if (d > R || !lineClear(g.x, g.y, e.x, e.y)) continue;
       var dmg = 88 * (1 - d / R) + 14;
@@ -1859,7 +2049,7 @@
     var hitAny = false;
     for (var i = 0; i < ents.length; i++) {
       var o = ents[i];
-      if (o === e || !o.alive || !foes(e, o)) continue;
+      if (o === e || !o.alive || o.air || !foes(e, o)) continue;
       var dx = o.x - e.x, dy = o.y - e.y;
       var d = Math.sqrt(dx * dx + dy * dy);
       if (d > 40) continue;
@@ -1897,7 +2087,8 @@
       });
     }
     emit(e.x, e.y, MOVE_SND.hit, e.id, 'hit');
-    if (e === player) { shake = Math.min(shake + 3, 9); dmgMarks.push({ ang: ang, t: 1.1 }); }
+    if (e === player) shake = Math.min(shake + 3, 9);
+    if (e.local) dmgMarks.push({ ang: ang, t: 1.1, who: e.id });
     if (e.hp > 0 && e.bot && !e.down) {
       var atk = ents[fromId];
       if (atk && atk.alive && foes(e, atk) && e.target !== atk) {
@@ -1949,8 +2140,11 @@
     var killer = ents[fromId];
     var kn = killer ? killer.name : 'THE ZONE';
     if (killer && killer !== e) killer.kills++;
-    if (killer === player) { kills++; feed('<b>YOU</b> eliminated ' + e.name, true); }
-    else if (e === player) { feed('<b>' + kn + '</b> eliminated YOU', true); }
+    if (killer && killer.local && killer !== e) {
+      kills++;
+      feed('<b>' + (splitOn ? killer.name : 'YOU') + '</b> eliminated ' + e.name, true);
+    }
+    else if (e.local) { feed('<b>' + kn + '</b> eliminated ' + (splitOn ? e.name : 'YOU'), true); }
     else feed('<b>' + kn + '</b> &rsaquo; ' + e.name, !!(killer && killer.team === player.team));
 
     if (MODE.zombies) {
@@ -1985,8 +2179,9 @@
       if (killer && killer !== e) {
         score[killer.id]++;
         if (score[killer.id] >= MODE.target) {
-          finish(killer === player, killer === player
-            ? 'You took it ' + score[0] + '\u2013' + score[1] + '.'
+          finish(!!killer.local, killer.local
+            ? (splitOn ? killer.name + ' took it ' + score[killer.id] + '\u2013' + score[e.id] + '.'
+                       : 'You took it ' + score[0] + '\u2013' + score[1] + '.')
             : kn + ' took it ' + score[1] + '\u2013' + score[0] + '.');
           return;
         }
@@ -1998,13 +2193,13 @@
       if (killer && killer !== e) {
         killer.level++;
         if (killer.level >= LADDER.length) {
-          finish(killer === player, killer === player
-            ? 'You ran the whole ladder and closed it out with the rifle.'
+          finish(!!killer.local, killer.local
+            ? (splitOn ? killer.name + ' ran the whole ladder first.' : 'You ran the whole ladder and closed it out with the rifle.')
             : kn + ' finished the ladder first.');
           return;
         }
         giveLoadout(killer);
-        if (killer === player) feed('promoted to <b>' + WEAPONS[LADDER[killer.level]].name + '</b>', true);
+        if (killer.local) feed((splitOn ? '<b>' + killer.name + '</b> ' : '') + 'promoted to <b>' + WEAPONS[LADDER[killer.level]].name + '</b>', true);
       }
       e.respawnT = 2.5;
       return;
@@ -2013,18 +2208,20 @@
     // battle royale
     alive--;
 
-    if (e === player) {
+    if (e.local && !anyLocalAlive()) {
       finish(false, killer && killer !== e
-        ? kn + ' put you down at ' + Math.round(dist(e, killer)) + ' units.'
-        : 'The zone closed over you.', alive + 1);
-    } else if (player.alive) {
+        ? kn + ' put ' + (splitOn ? e.name : 'you') + ' down at ' + Math.round(dist(e, killer)) + ' units.'
+        : 'The zone closed over ' + (splitOn ? e.name : 'you') + '.', alive + 1);
+    } else if (anyLocalAlive()) {
       var live = {}, nTeams = 0;
       for (var q = 0; q < ents.length; q++) {
         if (ents[q].alive && !live[ents[q].team]) { live[ents[q].team] = 1; nTeams++; }
       }
       if (nTeams === 1) {
+        var champ = null;
+        for (var q2 = 0; q2 < locals.length; q2++) if (locals[q2].alive) champ = locals[q2];
         finish(true, squad > 1 ? 'Your squad is the last one moving.'
-                               : 'Last one standing. Nothing left to hear.', 1);
+                   : (splitOn ? champ.name + ' is the last one standing.' : 'Last one standing. Nothing left to hear.'), 1);
       }
     }
   }
@@ -2152,7 +2349,7 @@
       var best = null, bestScore = -1, curScore = -1;
       for (var i = 0; i < ents.length; i++) {
         var o = ents[i];
-        if (o === e || !o.alive || !foes(e, o)) continue;
+        if (o === e || !o.alive || o.air || !foes(e, o)) continue;
         var d = dist(e, o);
         // In a free-for-all every face is an enemy. Only pick a NEW fight up
         // close - unless you are carrying the sniper - and keep your current
@@ -2408,7 +2605,7 @@
             if (cd < hurtD) { hurtD = cd; hurt = cand; }
           }
           if (hurt) { want = { x: hurt.x, y: hurt.y }; following = true; }
-          if (!want && player.alive && e.team === player.team && dist(e, player) > 230) {
+          if (!want && player.alive && !player.air && e.team === player.team && dist(e, player) > 230) {
             want = { x: player.x, y: player.y };
             following = true;
           }
@@ -2534,7 +2731,7 @@
       // governed by weapon spread, reaction delay and how fast they can turn.
       var angW = Math.atan2(tt.r + 3, Math.max(1, dd));
       var tol = Math.max(angW * 1.7, D.aimTol * 0.55);
-      if (dd < maxRange && Math.abs(diff) < tol && sightClear(e.x, e.y, tt.x, tt.y)) {
+      if (dd < maxRange && Math.abs(diff) < tol && sightClear(e.x, e.y, tt.x, tt.y) && !mateInLine(e, dd)) {
         if (slot.ammo <= 0 && e.reserve <= 0) { if (dd < 38) melee(e); }
         else if (slot.ammo <= 0) startReload(e);
         else {
@@ -2560,6 +2757,21 @@
     }
   }
 
+  // Nobody fires through their own teammate, even if the round would pass.
+  function mateInLine(e, range) {
+    var cx = Math.cos(e.ang), cy = Math.sin(e.ang);
+    for (var i = 0; i < ents.length; i++) {
+      var m = ents[i];
+      if (m === e || !m.alive || foes(e, m)) continue;
+      var rx = m.x - e.x, ry = m.y - e.y;
+      var along = rx * cx + ry * cy;
+      if (along <= 0 || along > range) continue;
+      var off = Math.abs(rx * cy - ry * cx);
+      if (off < m.r + 7) return true;
+    }
+    return false;
+  }
+
   // Where a bot's hand actually is, relative to a perfect line on the target.
   // A fresh target starts well off to one side and the shots walk in; after
   // that a slow sway stays, bigger when the target is strafing, the bot is
@@ -2580,28 +2792,59 @@
   }
 
   // ---------------------------------------------------------------- player
-  function updatePlayer(dt) {
-    pollPad();
-    var e = player;
-    if (!e.alive) return;
+  // One set of controls, read from whatever device this player owns. A lone
+  // player takes whichever is in use; in split screen each has their own.
+  function inputFor(e) {
+    var c = e.ctl || { any: true, kb: true };
+    if (c.any) {
+      return { any: true, pad: pad, hit: padHit, down: padDown, ax: padAxis,
+               kb: true, touch: true, padOn: padActive() };
+    }
+    var g = getPad(c.pad);
+    if (!e.padPrev) e.padPrev = {};
+    if (g) {
+      var busy = false, j;
+      for (j = 0; j < g.buttons.length; j++) if (g.buttons[j] && g.buttons[j].pressed) { busy = true; break; }
+      if (!busy) for (j = 0; j < g.axes.length; j++) if (Math.abs(g.axes[j]) > 0.45) { busy = true; break; }
+      if (busy) e.padLast = performance.now();
+    }
+    return {
+      any: false, pad: g,
+      hit: function (i) { return hitOf(g, e.padPrev, i); },
+      down: function (i) { return downOf(g, i); },
+      ax: function (i) { return axOf(g, i); },
+      kb: !!c.kb, touch: false, padOn: usingPad(e)
+    };
+  }
+
+  function updateLocal(e, dt) {
+    var I = inputFor(e);
+    if (!e.alive) { if (I.pad && I.hit(9)) pause(); return; }
+    if (e.air) {
+      e._spd = 0; e.prompt = null;
+      if (e === player) promptItem = null;
+      if (I.pad && I.hit(9)) { pause(); return; }
+      airControl(e, I, dt);
+      return;
+    }
     if (e.down) {
-      e._spd = 0; promptItem = null;
-      pollPad();
-      if (padHit(1)) { e.hp = 0; kill(e, -1); }        // B gives up
+      e._spd = 0; e.prompt = null;
+      if (e === player) promptItem = null;
+      if (I.pad && I.hit(1)) { e.hp = 0; kill(e, -1); }        // B gives up
+      if (I.pad && I.hit(9)) pause();
       return;
     }
     autoPickup(e);
 
-    promptItem = null;
-    if (true) {
-      var bestD = 26 * 26;
-      for (var i = 0; i < loot.length; i++) {
-        var it = loot[i];
-        if (it.type !== 'gun') continue;
-        var ddx = it.x - e.x, ddy = it.y - e.y, d2 = ddx * ddx + ddy * ddy;
-        if (d2 < bestD) { bestD = d2; promptItem = it; }
-      }
+    e.prompt = null;
+    var bestD = 26 * 26;
+    for (var i = 0; i < loot.length; i++) {
+      var it = loot[i];
+      if (it.type !== 'gun') continue;
+      var ddx = it.x - e.x, ddy = it.y - e.y, d2 = ddx * ddx + ddy * ddy;
+      if (d2 < bestD) { bestD = d2; e.prompt = it; }
     }
+    if (e === player) promptItem = e.prompt;
 
     if (e.useT > 0) {
       e.useT -= dt;
@@ -2610,34 +2853,34 @@
 
     var ix = 0, iy = 0;
     var padMove = false;
-    if (pad) {
-      var lx = padAxis(0), ly = padAxis(1);
+    if (I.pad) {
+      var lx = I.ax(0), ly = I.ax(1);
       if (lx || ly) {
         var ll = Math.sqrt(lx * lx + ly * ly);
         ix = lx / (ll > 1 ? ll : 1); iy = ly / (ll > 1 ? ll : 1);
         padMove = true;
       }
-      if (padHit(0)) playerPickup();
-      if (padHit(1)) melee(e);
-      if (padHit(2)) startReload(e);
-      if (padHit(3)) useMed(e);
-      if (padHit(14) || padHit(15)) swapSlot();
-      if (padHit(5)) throwNade(e, 'smoke');
-      if (padHit(6)) throwNade(e, 'frag');
-      if (padHit(12)) useMed(e);
-      if (padHit(9)) { pause(); return; }
+      if (I.hit(0)) playerPickup(e);
+      if (I.hit(1)) melee(e);
+      if (I.hit(2)) startReload(e);
+      if (I.hit(3)) useMed(e);
+      if (I.hit(14) || I.hit(15)) swapSlot(undefined, e);
+      if (I.hit(5)) throwNade(e, 'smoke');
+      if (I.hit(6)) throwNade(e, 'frag');
+      if (I.hit(12)) useMed(e);
+      if (I.hit(9)) { pause(); return; }
     }
-    if (!padMove && sticks.move) {
+    if (!padMove && I.touch && sticks.move) {
       var sdx = sticks.move.x - sticks.move.ox, sdy = sticks.move.y - sticks.move.oy;
       var sl = Math.sqrt(sdx * sdx + sdy * sdy);
       if (sl > 8) { ix = sdx / sl; iy = sdy / sl; }
-    } else {
+    } else if (!padMove && I.kb) {
       if (keys['a']) ix -= 1; if (keys['d']) ix += 1;
       if (keys['w']) iy -= 1; if (keys['s']) iy += 1;
       var l = Math.sqrt(ix * ix + iy * iy);
       if (l > 0) { ix /= l; iy /= l; }
     }
-    var sprinting = (!!keys['shift'] || padDown(4)) && (ix || iy);
+    var sprinting = ((I.kb && !!keys['shift']) || (!!I.pad && I.down(4))) && (ix || iy);
     var base = curW(e) ? 168 : (MODE.zombies && e.team === 1 ? 168 : 190);
     var speed = sprinting ? base * 1.45 : base;
     e._spd = (ix || iy) ? speed : 0;
@@ -2646,15 +2889,15 @@
 
     // Face the right stick if it is pushed; otherwise where you are walking on
     // a pad; otherwise the cursor. Never left pointing at nothing.
-    var rx = pad ? padAxis(2) : 0, ry = pad ? padAxis(3) : 0;
+    var rx = I.pad ? I.ax(2) : 0, ry = I.pad ? I.ax(3) : 0;
     if (rx || ry) {
       e.ang = aimAssist(e, Math.atan2(ry, rx));
-    } else if (sticks.aim) {
+    } else if (I.touch && sticks.aim) {
       var adx = sticks.aim.x - sticks.aim.ox, ady = sticks.aim.y - sticks.aim.oy;
       if (Math.sqrt(adx * adx + ady * ady) > 10) e.ang = Math.atan2(ady, adx);
-    } else if (padActive() && (ix || iy)) {
+    } else if (I.padOn && (ix || iy)) {
       e.ang = Math.atan2(iy, ix);
-    } else {
+    } else if (I.kb && (I.any || !I.padOn)) {
       e.ang = Math.atan2(mouse.wy - e.y, mouse.wx - e.x);
     }
 
@@ -2663,8 +2906,8 @@
       e.reloadT -= dt;
       if (e.reloadT <= 0) finishReload(e);
     }
-    var firing = mouse.down || padDown(7) ||
-      (sticks.aim && Math.abs(sticks.aim.x - sticks.aim.ox) + Math.abs(sticks.aim.y - sticks.aim.oy) > 26);
+    var firing = (I.kb && mouse.down) || (!!I.pad && I.down(7)) ||
+      (I.touch && sticks.aim && Math.abs(sticks.aim.x - sticks.aim.ox) + Math.abs(sticks.aim.y - sticks.aim.oy) > 26);
     if (firing) {
       var cw2 = curW(e), cs2 = curSlot(e);
       if (!cw2 || (cs2.ammo <= 0 && e.reserve <= 0)) melee(e);   // nothing to shoot with
@@ -2673,16 +2916,20 @@
     }
   }
 
-  function playerPickup() {
-    if (!promptItem) return;
-    var idx = loot.indexOf(promptItem);
-    if (idx >= 0) takeGun(player, promptItem, idx);
-    promptItem = null;
+  function playerPickup(e) {
+    e = e || kbPlayer();
+    var it = e.prompt;
+    if (!it) return;
+    var idx = loot.indexOf(it);
+    if (idx >= 0) takeGun(e, it, idx);
+    e.prompt = null;
+    if (e === player) promptItem = null;
   }
-  function swapSlot(n) {
-    if (n === undefined) n = player.slot === 0 ? 1 : 0;
-    if (!player.slots[n] || n === player.slot) return;
-    player.slot = n; player.reloadT = 0;
+  function swapSlot(n, e) {
+    e = e || kbPlayer();
+    if (n === undefined) n = e.slot === 0 ? 1 : 0;
+    if (!e.slots[n] || n === e.slot) return;
+    e.slot = n; e.reloadT = 0;
   }
 
   // ---------------------------------------------------------------- sim
@@ -2708,11 +2955,11 @@
         }
         for (var j = 0; j < ents.length; j++) {
           var e = ents[j];
-          if (!e.alive || e.id === b.owner) continue;
+          if (!e.alive || e.air || e.id === b.owner) continue;
           if (ents[b.owner] && e.team === ents[b.owner].team) continue;
           var dx = e.x - b.x, dy = e.y - b.y;
           if (dx * dx + dy * dy < (e.r + 3) * (e.r + 3)) {
-            if (b.owner === player.id) hits++;
+            if (ents[b.owner] && ents[b.owner].local) hits++;
             damage(e, b.dmg, b.owner, Math.atan2(b.vy, b.vx));
             dead = true; break;
           }
@@ -2791,12 +3038,12 @@
     }
     for (var i = 0; i < ents.length; i++) {
       var e = ents[i];
-      if (!e.alive) continue;
+      if (!e.alive || e.air) continue;
       var dx = e.x - zone.cx, dy = e.y - zone.cy;
       if (Math.sqrt(dx * dx + dy * dy) > zone.r) {
         if (!(godMode && e === player)) e.hp -= zone.dps * dt;
         if (e.hp <= 0) kill(e, -1);
-        else if (e === player && Math.random() < dt * 3) dmgMarks.push({ ang: Math.atan2(dy, dx), t: 0.5 });
+        else if (e.local && Math.random() < dt * 3) dmgMarks.push({ ang: Math.atan2(dy, dx), t: 0.5, who: e.id });
       }
     }
   }
@@ -2819,10 +3066,14 @@
       if (e.throwT > 0) e.throwT -= dt;
     }
 
-    updatePlayer(dt);
+    pollPad();
+    updateMouseWorld();
+    updateDrop(dt);
+    for (i = 0; i < locals.length; i++) updateLocal(locals[i], dt);
+    if (state !== 'play') return;
     for (i = 0; i < ents.length; i++) {
       e = ents[i];
-      if (e.bot && e.alive && !e.down) botThink(e, dt);
+      if (e.bot && e.alive && !e.down && !e.air) botThink(e, dt);
     }
     updateBullets(dt);
     updateNades(dt);
@@ -2860,7 +3111,7 @@
       var medic = null;
       for (var j2 = 0; j2 < ents.length; j2++) {
         var m2 = ents[j2];
-        if (m2 === e || !m2.alive || m2.down || m2.team !== e.team) continue;
+        if (m2 === e || !m2.alive || m2.down || m2.air || m2.team !== e.team) continue;
         if (dist(m2, e) < 30) { medic = m2; break; }
       }
       if (medic) {
@@ -2928,14 +3179,18 @@
     }
     shake *= Math.pow(0.0015, dt);
 
-    var tx = player.x, ty = player.y;
-    if (!touchMode) {
-      tx += clamp(mouse.wx - player.x, -110, 110) * 0.2;
-      ty += clamp(mouse.wy - player.y, -110, 110) * 0.2;
-    }
     var lerp = 1 - Math.pow(0.0001, dt);
-    cam.x += (tx - cam.x) * lerp;
-    cam.y += (ty - cam.y) * lerp;
+    for (var li = 0; li < locals.length; li++) {
+      var L = locals[li], lc = L.cam || cam;
+      var tx = L.x, ty = L.y;
+      // the mouse leads the camera for whoever is on it
+      if (!touchMode && L.ctl && L.ctl.kb && (L.ctl.any || !usingPad(L))) {
+        tx += clamp(mouse.wx - L.x, -110, 110) * 0.2;
+        ty += clamp(mouse.wy - L.y, -110, 110) * 0.2;
+      }
+      lc.x += (tx - lc.x) * lerp;
+      lc.y += (ty - lc.y) * lerp;
+    }
 
     syncHud();
   }
@@ -3043,7 +3298,7 @@
     var sx = sk ? rr(-sk, sk) : 0;
     var sy = sk ? rr(-sk, sk) : 0;
     ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom,
-      dpr * (cw / 2 - cam.x * zoom + sx), dpr * (ch / 2 - cam.y * zoom + sy));
+      dpr * (VX + cw / 2 - cam.x * zoom + sx), dpr * (VY + ch / 2 - cam.y * zoom + sy));
   }
 
   // Drop-in sprites. Anything not supplied keeps the vector art, so a partial
@@ -3338,6 +3593,12 @@
     // testing only: make the player unkillable so a sim runs bot-vs-bot
     god: function (on) { godMode = !!on; return godMode; },
     aimErr: function (on) { aimErrOn = !!on; return aimErrOn; },
+    locals: function () {
+      return locals.map(function (L) {
+        return { name: L.name, x: Math.round(L.x), y: Math.round(L.y), ang: +L.ang.toFixed(2), team: L.team,
+                 alive: L.alive, hp: Math.round(L.hp), ctl: L.ctl, w: curW(L) ? curW(L).name : null };
+      });
+    },
     // advance the simulation without drawing, for testing behaviour
     step: function (seconds, dt) {
       dt = dt || 1 / 60;
@@ -3448,7 +3709,112 @@
     ctx.fillStyle = '#04060a';
     ctx.fillRect(0, 0, cw, ch);
     if (state === 'menu' || state === 'over') { renderAmbient(); return; }
+    if (!player) return;
 
+    if (!splitOn) {
+      VX = 0; VY = 0; VW = cw; VH = ch;
+      player.vx = 0; player.vy = 0; player.vw = cw; player.vh = ch; player.zoom = zoom;
+      renderScene();
+      return;
+    }
+
+    // Each local player gets a slice: side by side on a wide screen, stacked
+    // on a tall one. Everything below draws as if its slice were the screen.
+    var fullW = cw, fullH = ch, z0 = zoom, p0 = player, cam0 = cam, pr0 = promptItem;
+    var side = fullW >= fullH;
+    for (var pi = 0; pi < locals.length; pi++) {
+      var L = locals[pi];
+      if (side) { VX = Math.round(pi * fullW / 2); VY = 0; VW = Math.round(fullW / 2); VH = fullH; }
+      else { VX = 0; VY = Math.round(pi * fullH / 2); VW = fullW; VH = Math.round(fullH / 2); }
+      L.vx = VX; L.vy = VY; L.vw = VW; L.vh = VH;
+      L.zoom = Math.max(0.5, Math.min(2.4, Math.min(VW, VH) / (VIEW_BASE * 2 + 60)));
+      cw = VW; ch = VH; zoom = L.zoom; player = L; cam = L.cam; promptItem = L.prompt;
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.beginPath(); ctx.rect(VX, VY, VW, VH); ctx.clip();
+      renderScene();
+      drawSplitHud(L);
+      ctx.restore();
+    }
+    cw = fullW; ch = fullH; zoom = z0; player = p0; cam = cam0; promptItem = pr0;
+    VX = 0; VY = 0; VW = cw; VH = ch;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#0d0f12';
+    if (side) ctx.fillRect(Math.round(cw / 2) - 2, 0, 4, ch);
+    else ctx.fillRect(0, Math.round(ch / 2) - 2, cw, 4);
+    ctx.fillStyle = 'rgba(242,189,29,.55)';
+    if (side) ctx.fillRect(Math.round(cw / 2) - 0.5, 0, 1, ch);
+    else ctx.fillRect(0, Math.round(ch / 2) - 0.5, cw, 1);
+  }
+
+  // Your own numbers, drawn into your own slice of a split screen.
+  function drawSplitHud(L) {
+    ctx.setTransform(dpr, 0, 0, dpr, dpr * VX, dpr * VY);
+    ctx.save();
+    ctx.textBaseline = 'alphabetic';
+    var pad2 = 14, by = VH - pad2;
+    // who is who, top right
+    ctx.font = '400 15px "Russo One", "Chakra Petch", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#0d0f12';
+    ctx.fillText(L.name, VW / 2 + 2, by - 12 + 2);
+    ctx.fillStyle = L === locals[0] ? '#f2bd1d' : '#7ce7d8';
+    ctx.fillText(L.name, VW / 2, by - 12);
+    ctx.font = '500 9px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(198,212,227,.6)';
+    ctx.fillText(usingPad(L) ? 'CONTROLLER' : 'KEYBOARD', VW / 2, by + 2);
+
+    if (!L.alive) {
+      ctx.textAlign = 'center';
+      ctx.font = '400 22px "Russo One", "Chakra Petch", sans-serif';
+      ctx.fillStyle = '#f1e7d0';
+      var msg = L.respawnT > 0 ? 'RESPAWNING ' + Math.ceil(L.respawnT) : 'OUT';
+      ctx.fillText(msg, VW / 2, VH / 2);
+      ctx.restore();
+      return;
+    }
+
+    // health, bottom left
+    var hp = Math.max(0, Math.round(L.hp)), bw = Math.min(170, VW * 0.34);
+    ctx.fillStyle = 'rgba(44,61,82,.7)';
+    ctx.fillRect(pad2, by - 34, bw, 5);
+    ctx.fillStyle = hp <= 35 ? '#ff4d8d' : '#7ce7d8';
+    ctx.fillRect(pad2, by - 34, bw * hp / 100, 5);
+    ctx.textAlign = 'left';
+    ctx.font = '700 20px "Chakra Petch", sans-serif';
+    ctx.fillStyle = '#c6d4e3';
+    ctx.fillText(String(hp), pad2, by - 10);
+    ctx.font = '500 9px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(198,212,227,.6)';
+    var kit = 'STIM ' + L.meds + '  FRAG ' + L.nades + '  SMOKE ' + L.smokes;
+    ctx.fillText(kit, pad2, by + 2);
+
+    // weapon, bottom right
+    var w = curW(L), sl = curSlot(L);
+    ctx.textAlign = 'right';
+    ctx.font = '500 9px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(198,212,227,.6)';
+    ctx.fillText(w ? w.name : 'UNARMED', VW - pad2, by - 30);
+    ctx.font = '700 24px "Chakra Petch", sans-serif';
+    ctx.fillStyle = w && sl.ammo <= 0 ? '#ff4d8d' : '#c6d4e3';
+    var res = L.reserve >= 9000 ? '\u221e' : String(L.reserve);
+    var ammoTxt = w ? String(sl.ammo) : '--';
+    ctx.fillText(ammoTxt, VW - pad2 - 40, by - 6);
+    ctx.font = '500 11px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(198,212,227,.6)';
+    ctx.fillText('/ ' + res, VW - pad2, by - 6);
+    if (w && (L.reloadT > 0 || L.useT > 0)) {
+      var k = L.reloadT > 0 ? 1 - L.reloadT / w.reload : 1 - L.useT / 1.6;
+      ctx.fillStyle = 'rgba(44,61,82,.7)';
+      ctx.fillRect(VW - pad2 - 78, by + 1, 78, 3);
+      ctx.fillStyle = '#ffc95e';
+      ctx.fillRect(VW - pad2 - 78, by + 1, 78 * clamp(k, 0, 1), 3);
+    }
+    ctx.restore();
+  }
+
+  function renderScene() {
     var halfW = cw / (2 * zoom), halfH = ch / (2 * zoom);
     var vx0 = cam.x - halfW, vx1 = cam.x + halfW, vy0 = cam.y - halfH, vy1 = cam.y + halfH;
     var t0 = Math.max(0, Math.floor(vx0 / TILE) - 1), t1 = Math.min(MAP_W - 1, Math.ceil(vx1 / TILE) + 1);
@@ -3631,7 +3997,7 @@
     }
     for (i = 0; i < ents.length; i++) {
       var en = ents[i];
-      if (!en.alive || en === player) continue;
+      if (!en.alive || en === player || en.air === 'plane') continue;
       if (!visibleToPlayer(en.x, en.y)) continue;
       drawUnit(en, en.team === player.team ? '#8ff0e4' : '#ff7a4d');
     }
@@ -3766,9 +4132,11 @@
       }
     }
 
-    if (player.alive) drawUnit(player, curW(player) ? '#8ff0e4' : '#5d7288');
+    if (player.alive && player.air !== 'plane') drawUnit(player, curW(player) ? '#8ff0e4' : '#5d7288');
+    if (plane && plane.t < plane.dur + 2) drawPlane();
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, dpr * VX, dpr * VY);
+    renderDropHint();
     renderAllies();
     renderObjectives();
     if (SET.minimap) drawMinimap();
@@ -3776,10 +4144,11 @@
     renderDowned();
     renderPrompt();
     renderDamage();
-    if (touchMode) renderSticks();
+    if (touchMode && !splitOn) renderSticks();
   }
 
   function drawUnit(e, color) {
+    if (e.air === 'chute') { drawChute(e); return; }
     var spr = SPRITES[e === player ? 'player' : 'enemy'];
     if (PACK_READY && e.down) {
       var dt2 = TEAM_TINT[e.team === player.team ? 0 : 1];
@@ -3899,10 +4268,11 @@
   // out in front - at half a screen, or on the first wall in the way.
   var cursorHidden = null;
   function renderReticle() {
-    var on = padActive();
-    if (cursorHidden !== on) {
-      cursorHidden = on;
-      canvas.style.cursor = on ? 'none' : 'crosshair';
+    var on = usingPad(player);
+    var hideC = splitOn ? usingPad(kbPlayer()) : on;
+    if (cursorHidden !== hideC) {
+      cursorHidden = hideC;
+      canvas.style.cursor = hideC ? 'none' : 'crosshair';
     }
     if (!on || !player.alive || player.down) return;
     var maxD = Math.min(cw, ch) * 0.5 / zoom;
@@ -3949,7 +4319,7 @@
     var mates = [];
     for (var i = 0; i < ents.length; i++) {
       var a = ents[i];
-      if (a === player || !a.alive || a.team !== player.team) continue;
+      if (a === player || !a.alive || a.air === 'plane' || a.team !== player.team) continue;
       mates.push(a);
     }
     if (!mates.length) return;
@@ -4050,10 +4420,103 @@
     }
   }
 
+  // The drop plane, top down: a chunky transport in the pack's colours.
+  function drawPlane() {
+    var a = Math.atan2(plane.dy, plane.dx);
+    function body(ox, oy, fill, line) {
+      ctx.save();
+      ctx.translate(plane.x + ox, plane.y + oy);
+      ctx.rotate(a);
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = line ? 3.5 : 0;
+      ctx.strokeStyle = '#0d0f12';
+      ctx.fillStyle = fill;
+      // wings
+      ctx.beginPath();
+      ctx.moveTo(8, 0); ctx.lineTo(-14, -78); ctx.lineTo(-34, -78); ctx.lineTo(-26, 0);
+      ctx.lineTo(-34, 78); ctx.lineTo(-14, 78); ctx.closePath();
+      ctx.fill(); if (line) ctx.stroke();
+      // tail
+      ctx.beginPath();
+      ctx.moveTo(-60, 0); ctx.lineTo(-76, -28); ctx.lineTo(-86, -28); ctx.lineTo(-82, 0);
+      ctx.lineTo(-86, 28); ctx.lineTo(-76, 28); ctx.closePath();
+      ctx.fill(); if (line) ctx.stroke();
+      // fuselage
+      ctx.beginPath();
+      ctx.moveTo(62, 0); ctx.quadraticCurveTo(58, -14, 30, -14); ctx.lineTo(-80, -9);
+      ctx.lineTo(-80, 9); ctx.lineTo(30, 14); ctx.quadraticCurveTo(58, 14, 62, 0);
+      ctx.fill(); if (line) ctx.stroke();
+      if (line) {
+        ctx.fillStyle = '#f2bd1d';
+        ctx.fillRect(-40, -3, 60, 6);                     // gold stripe
+        ctx.fillStyle = '#9fd3e8';
+        ctx.beginPath(); ctx.ellipse(46, 0, 7, 9, 0, 0, 6.2832); ctx.fill(); ctx.stroke();
+        // engines
+        ctx.fillStyle = '#1d2d3b';
+        ctx.fillRect(-12, -52, 22, 11); ctx.strokeRect(-12, -52, 22, 11);
+        ctx.fillRect(-12, 41, 22, 11); ctx.strokeRect(-12, 41, 22, 11);
+      }
+      ctx.restore();
+    }
+    body(46, 58, 'rgba(0,0,0,.28)', false);                // shadow on the ground
+    body(0, 0, '#2e4559', true);
+  }
+
+  function drawChute(e) {
+    var k = clamp(e.airT / CHUTE_TIME, 0, 1);              // 0 just out, 1 on the ground
+    var hgt = (1 - k) * 34;
+    // shadow shrinks toward you as you come down
+    ctx.fillStyle = 'rgba(0,0,0,.3)';
+    ctx.beginPath(); ctx.ellipse(e.x + hgt * 0.8, e.y + hgt, 10, 7, 0, 0, 6.2832); ctx.fill();
+    var R = 24 + (1 - k) * 8;
+    var tint = e.team === player.team ? '#f2bd1d' : '#e0643a';
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.rotate(e.ang);
+    ctx.lineWidth = 2.5; ctx.strokeStyle = '#0d0f12';
+    for (var i = 0; i < 6; i++) {                          // panels
+      ctx.fillStyle = i % 2 ? tint : '#f1e7d0';
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.arc(0, 0, R, i * Math.PI / 3, (i + 1) * Math.PI / 3);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    ctx.fillStyle = '#0d0f12';
+    ctx.beginPath(); ctx.arc(0, 0, 4, 0, 6.2832); ctx.fill();
+    ctx.restore();
+  }
+
+  function renderDropHint() {
+    if (!player.alive || !player.air) return;
+    var txt, sub2 = null;
+    if (player.air === 'plane') {
+      txt = promptKey('SPACE', 'A') + '  JUMP';
+      var left = Math.max(0, plane.dur * 0.93 - plane.t);
+      sub2 = 'THE PLANE DROPS EVERYONE IN ' + Math.ceil(left) + 's';
+    } else {
+      txt = 'STEER YOUR LANDING';
+      sub2 = promptKey('WASD', 'LEFT STICK');
+    }
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '400 18px "Russo One", "Chakra Petch", sans-serif';
+    var tw = ctx.measureText(txt).width + 40, bx = cw / 2 - tw / 2, by = ch * 0.7;
+    ctx.fillStyle = '#f2bd1d'; ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 3;
+    ctx.fillRect(bx, by, tw, 36); ctx.strokeRect(bx, by, tw, 36);
+    ctx.fillStyle = '#0d0f12';
+    ctx.fillText(txt, cw / 2, by + 19);
+    ctx.font = '500 10px "IBM Plex Mono", monospace';
+    ctx.fillStyle = '#f1e7d0';
+    ctx.fillText(sub2, cw / 2, by + 52);
+    ctx.restore();
+  }
+
   // ---- minimap: only ground you have actually seen ------------------------
-  var mini = null, miniAge = 0;
+  var mini = null, miniAge = 0, miniReveal = false;
   function drawMinimap() {
     if (!mini) mini = document.createElement('canvas');
+    var rev = false;
+    for (var lq = 0; lq < locals.length; lq++) if (locals[lq].air) rev = true;
+    if (rev !== miniReveal) { miniReveal = rev; miniAge = 0; }
     if (mini.width !== MAP_W || mini.height !== MAP_H) {
       mini.width = MAP_W; mini.height = MAP_H; miniAge = 0;
     }
@@ -4064,7 +4527,7 @@
       var d = img.data;
       for (var y = 0; y < MAP_H; y++) for (var x = 0; x < MAP_W; x++) {
         var o4 = (y * MAP_W + x) * 4, gi = y * STRIDE + x;
-        if (!explored[gi]) { d[o4 + 3] = 0; continue; }
+        if (!explored[gi] && !miniReveal) { d[o4 + 3] = 0; continue; }
         var wall = grid[gi] === 1;
         d[o4] = wall ? 62 : 20;
         d[o4 + 1] = wall ? 82 : 30;
@@ -4088,6 +4551,18 @@
     ctx.drawImage(mini, bx, by, S, S);
     ctx.imageSmoothingEnabled = true;
 
+    if (plane && miniReveal) {
+      ctx.strokeStyle = 'rgba(242,189,29,.8)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(mx(plane.x0), my(plane.y0));
+      ctx.lineTo(mx(plane.x0 + plane.dx * plane.len), my(plane.y0 + plane.dy * plane.len));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#f2bd1d';
+      ctx.beginPath(); ctx.arc(mx(plane.x), my(plane.y), 3.2, 0, 6.2832); ctx.fill();
+    }
     if (zone) {
       ctx.strokeStyle = 'rgba(255,77,141,.75)';
       ctx.lineWidth = 1.2;
@@ -4147,6 +4622,7 @@
   function renderDamage() {
     for (var i = 0; i < dmgMarks.length; i++) {
       var m = dmgMarks[i];
+      if (m.who !== undefined && m.who !== player.id) continue;
       var a = clamp(m.t / 1.1, 0, 1) * 0.6;
       var rad = Math.min(cw, ch) * 0.42;
       ctx.save();
@@ -4223,6 +4699,31 @@
 
   // ---------------------------------------------------------------- input
   // ---- controller ---------------------------------------------------------
+  function getPad(i) {
+    var l = navigator.getGamepads ? navigator.getGamepads() : null;
+    return (i >= 0 && l && l[i] && l[i].connected) ? l[i] : null;
+  }
+  function axOf(g, i) {
+    if (!g || !g.axes || g.axes.length <= i) return 0;
+    var v = g.axes[i], dz = SET.dead / 100;
+    if (v > -dz && v < dz) return 0;
+    return (v - (v > 0 ? dz : -dz)) / (1 - dz);
+  }
+  function downOf(g, i) { return !!(g && g.buttons && g.buttons[i] && g.buttons[i].pressed); }
+  function hitOf(g, prev, i) {
+    var now = downOf(g, i), was = prev[i];
+    prev[i] = now;
+    return now && !was;
+  }
+  // Is this player on a pad right now? Drives the button labels and the aim dot.
+  function usingPad(e) {
+    var c = e && e.ctl;
+    if (!c || c.any) return padActive();
+    if (c.pad < 0) return false;
+    if (!c.kb) return true;
+    return (performance.now() - (e.padLast || -1e9)) < 10000;
+  }
+
   var pad = null, padPrev = {}, padSeen = false, padLast = -1e9;
   function pollPad() {
     var list = navigator.getGamepads ? navigator.getGamepads() : null;
@@ -4241,7 +4742,7 @@
   }
   function padActive() { return !!pad && (performance.now() - padLast) < 10000; }
   // Prompts read as whatever you are actually holding.
-  function promptKey(keyLabel, padLabel) { return padActive() ? padLabel : keyLabel; }
+  function promptKey(keyLabel, padLabel) { return usingPad(player) ? padLabel : keyLabel; }
   function padAxis(i) {
     if (!pad || !pad.axes || pad.axes.length <= i) return 0;
     var v = pad.axes[i];
@@ -4325,8 +4826,17 @@
   }
 
   function screenToWorld(sx, sy) {
-    mouse.wx = (sx - cw / 2) / zoom + cam.x;
-    mouse.wy = (sy - ch / 2) / zoom + cam.y;
+    mouse.sx = sx; mouse.sy = sy;
+    updateMouseWorld();
+  }
+  // The cursor has to be re-projected every frame, not only when it moves:
+  // the camera slides underneath a still mouse.
+  function updateMouseWorld() {
+    if (mouse.sx === undefined || !player) return;
+    var L = kbPlayer(), c = L.cam || cam;
+    var vx = L.vw ? L.vx : 0, vy = L.vh ? L.vy : 0, vw = L.vw || cw, vh = L.vh || ch, z = L.zoom || zoom;
+    mouse.wx = (mouse.sx - vx - vw / 2) / z + c.x;
+    mouse.wy = (mouse.sy - vy - vh / 2) / z + c.y;
   }
   canvas.addEventListener('pointerdown', function (ev) {
     var r = canvas.getBoundingClientRect();
@@ -4362,16 +4872,19 @@
     var k = e.key.toLowerCase();
     keys[k] = true;
     if (state === 'play') {
-      if (k === 'r') startReload(player);
-      else if (k === 'e') playerPickup();
-      else if (k === 'q') swapSlot();
-      else if (k === '1') swapSlot(0);
-      else if (k === '2') swapSlot(1);
-      else if (k === 'f') useMed(player);
-      else if (k === 'g') throwNade(player, 'frag');
-      else if (k === 'h') throwNade(player, 'smoke');
-      else if (k === 'v') melee(player);
-      else if (k === 'x' && player.down) { player.hp = 0; kill(player, -1); }
+      var kp = kbPlayer();
+      if (kp.air === 'plane' && (k === 'e' || k === ' ')) kp.jumpReq = true;
+      if (kp.air) { if (k === 'escape') pause(); if (k === 'm') { muted = !muted; } return; }
+      if (k === 'r') startReload(kp);
+      else if (k === 'e') playerPickup(kp);
+      else if (k === 'q') swapSlot(undefined, kp);
+      else if (k === '1') swapSlot(0, kp);
+      else if (k === '2') swapSlot(1, kp);
+      else if (k === 'f') useMed(kp);
+      else if (k === 'g') throwNade(kp, 'frag');
+      else if (k === 'h') throwNade(kp, 'smoke');
+      else if (k === 'v') melee(kp);
+      else if (k === 'x' && kp.down) { kp.hp = 0; kill(kp, -1); }
       else if (k === 'm') { muted = !muted; feed(muted ? 'sound <b>off</b>' : 'sound <b>on</b>', true); }
       else if (k === 'escape') pause();
     } else if (k === 'escape' && state === 'paused') resume();
@@ -4404,6 +4917,7 @@
       b.setAttribute('aria-pressed', b.getAttribute(attr) === value ? 'true' : 'false');
     });
   }
+  var MODE_TEAMMATES = { team: 1, war: 1, ctf: 1, sect: 1, zomb: 1 };
   function syncMenu() {
     $('mapPick').hidden = (mode === 'duel');
     $('squadPick').hidden = !!MODES[mode].teams;
@@ -4414,6 +4928,13 @@
         : '  \u2014  CQB: a dense warren of rooms and corridors.';
     }
     if (squad > 1 && mode !== 'team') t += '  \u2014  DUOS: you drop with a partner, you cannot hurt each other, and neither of you reacts to the other\'s noise.';
+    if (splitWant) {
+      var np = padIndices().length;
+      t += np >= 2 ? '  \u2014  SPLIT SCREEN: one controller each.'
+         : np === 1 ? '  \u2014  SPLIT SCREEN: P1 on keyboard and mouse, P2 on the controller.'
+         : '  \u2014  SPLIT SCREEN: plug in a controller for player 2 and press a button on it.';
+      if (squad < 2 && !MODE_TEAMMATES[mode]) t += ' In solo you two are rivals; pick DUOS to team up.';
+    }
     if (blackout) t += '  \u2014  BLACKOUT: your eyes reach barely past your own feet. Sound tells you roughly where someone is; the flash of their gun is the only thing that tells you exactly.';
     $('modeDesc').textContent = t;
     $('startBtn').textContent = mode === 'br' ? 'DROP IN'
@@ -4424,6 +4945,13 @@
     if (!b) return;
     squad = parseInt(b.getAttribute('data-s'), 10);
     pressRow(this, 'data-s', String(squad));
+    syncMenu();
+  });
+  $('playersRow').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button');
+    if (!b) return;
+    splitWant = b.getAttribute('data-n') === '2';
+    pressRow(this, 'data-n', splitWant ? '2' : '1');
     syncMenu();
   });
   $('lightRow').addEventListener('click', function (ev) {
@@ -4543,7 +5071,7 @@
     $('settings').hidden = true;
     elMenu.hidden = false;
   });
-  window.addEventListener('gamepadconnected', function () { padSeen = true; syncSettings(); });
+  window.addEventListener('gamepadconnected', function () { padSeen = true; syncSettings(); syncMenu(); });
 
   $('shopBtn').addEventListener('click', function () {
     buildShop(); refreshCoins();
