@@ -115,6 +115,10 @@ h1 .gold{color:var(--gold)}
 .go.ghost{background:var(--navy);color:var(--paper);font-size:13px;padding:11px 30px;box-shadow:0 4px 0 var(--out),0 7px 0 rgba(0,0,0,.3)}
 .go.ghost:hover{background:var(--navy-l);color:var(--gold)}
 .go.ghost:active{box-shadow:0 1px 0 var(--out)}
+.netcode{font-family:var(--font-m);font-size:11px;letter-spacing:.3em;color:var(--khaki);text-align:center}
+.netcode b{display:block;margin-top:6px;font-family:var(--font-x);font-weight:400;font-size:42px;letter-spacing:.22em;text-indent:.22em;color:var(--gold);-webkit-text-stroke:2px var(--out);paint-order:stroke fill;text-shadow:3px 3px 0 var(--out)}
+.joinrow{display:flex;gap:10px;align-items:center;justify-content:center}
+.joinrow input{width:150px;padding:11px 12px;font-family:var(--font-x);font-size:18px;letter-spacing:.3em;text-indent:.3em;text-transform:uppercase;text-align:center;background:var(--paper);color:var(--out);border:3px solid var(--out);border-radius:4px}
 .ptitle{margin:0;font-family:var(--font-x);font-weight:400;font-size:clamp(32px,8.5vw,50px);letter-spacing:.14em;text-indent:.14em;line-height:1;color:var(--paper);-webkit-text-stroke:2px var(--out);paint-order:stroke fill;text-shadow:4px 4px 0 var(--out)}
 .pbtns{display:flex;flex-direction:column;align-items:center;gap:16px}
 .setlist{width:100%;max-width:440px;display:flex;flex-direction:column;gap:2px;background:var(--out);border:3px solid var(--out);box-shadow:4px 4px 0 rgba(0,0,0,.45)}
@@ -270,8 +274,32 @@ h1 .gold{color:var(--gold)}
       </div>
       <div class="pbtns">
         <button class="go" id="startBtn" type="button">DROP IN</button>
+        <button class="go ghost" id="onlineBtn" type="button">PLAY ONLINE</button>
         <button class="go ghost" id="shopBtn" type="button">SKINS &middot; <span id="menuCoins">0</span> CR</button>
         <button class="go ghost" id="setBtn" type="button">SETTINGS</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="online" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h2 class="ptitle">ONLINE</h2>
+        <div class="rule"></div>
+        <div class="tag">you and a friend, anywhere</div>
+      </div>
+      <div class="pbtns">
+        <button class="go" id="netHost" type="button">HOST A GAME</button>
+        <div class="netcode" id="netCodeBox" hidden>ROOM CODE<b id="netCode">-----</b></div>
+        <div class="joinrow">
+          <input id="netJoinCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" aria-label="Room code">
+          <button class="go ghost" id="netJoin" type="button">JOIN</button>
+        </div>
+      </div>
+      <p class="modedesc" id="netStatus">One of you hosts, the other joins with the code.</p>
+      <div class="pbtns">
+        <button class="go ghost" id="netLeave" type="button">DISCONNECT</button>
+        <button class="go ghost" id="netBack" type="button">BACK</button>
       </div>
     </div>
   </div>
