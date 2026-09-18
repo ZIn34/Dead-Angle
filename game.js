@@ -2004,10 +2004,19 @@
         spin: rr(0, 6.2832), ammo: ammo || 0, n: n || 0, seen: false
       });
     }
+    // Most fighters die mid-fight with an empty magazine, so their guns hit
+    // the floor dry and read as useless. Spend their spare rounds loading the
+    // guns first; only what is left over drops as a box.
+    var pool = (e.reserve > 0 && e.reserve < 9000) ? e.reserve : 0;
+    if (e.reserve >= 9000) pool = 60;                  // gun game: no finite reserve
     for (var sx2 = 0; sx2 < 2; sx2++) {
-      if (e.slots[sx2]) put('gun', e.slots[sx2].key, e.slots[sx2].ammo, 0);
+      var ds = e.slots[sx2];
+      if (!ds || !WEAPONS[ds.key]) continue;
+      var fill = Math.max(0, Math.min(WEAPONS[ds.key].mag - ds.ammo, pool));
+      pool -= fill;
+      put('gun', ds.key, ds.ammo + fill, 0);
     }
-    if (e.reserve > 10 && e.reserve < 9000) put('ammo', null, 0, Math.min(60, e.reserve));
+    if (pool > 10) put('ammo', null, 0, Math.min(60, pool));
     while (e.meds > 0) { put('med', null, 0, 1); e.meds--; }
     while (e.nades > 0) { put('nade', null, 0, 1); e.nades--; }
     while (e.smokes > 0) { put('smoke', null, 0, 1); e.smokes--; }
@@ -3196,6 +3205,14 @@
         update(dt);
       }
       return window.EARSHOT.debug();
+    },
+    // every bot's gun, magazine and spare rounds, for diagnosing supply
+    bots: function () {
+      return ents.filter(function (e) { return e.bot; }).map(function (e) {
+        var sl = curSlot(e);
+        return { n: e.name, alive: e.alive, team: e.team, gun: sl ? sl.key : null,
+                 mag: sl ? sl.ammo : 0, reserve: e.reserve, reloading: e.reloadT > 0 };
+      });
     },
     // a read-only peek at the simulation, for diagnosing behaviour
     debug: function () {
