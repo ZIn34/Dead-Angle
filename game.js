@@ -2476,7 +2476,8 @@
       if (padHit(0)) playerPickup();
       if (padHit(1)) melee(e);
       if (padHit(2)) startReload(e);
-      if (padHit(3)) swapSlot();
+      if (padHit(3)) useMed(e);
+      if (padHit(14) || padHit(15)) swapSlot();
       if (padHit(5)) throwNade(e, 'smoke');
       if (padHit(6)) throwNade(e, 'frag');
       if (padHit(12)) useMed(e);
@@ -2798,6 +2799,10 @@
     elHpFill.className = hp <= 35 ? 'low' : '';
     elMedsN.textContent = player.meds;
     elMedsBox.className = 'meds' + (player.meds ? '' : ' none');
+    var mk = $('medsKey'), nk = $('nadesKey'), sk2 = $('smokesKey');
+    if (mk) mk.textContent = promptKey('F', 'Y');
+    if (nk) nk.textContent = promptKey('G', 'LT');
+    if (sk2) sk2.textContent = promptKey('H', 'RB');
     var nb2 = $('nadesN'), nbx = $('nadesBox');
     if (nb2) nb2.textContent = player.nades;
     if (nbx) nbx.className = 'meds' + (player.nades ? '' : ' none');
@@ -3533,7 +3538,7 @@
         ctx.save();
         ctx.translate(fl.x, fl.y);
         ctx.rotate(fl.ang);
-        var fs = 0.5 * (fl.scale || 1);
+        var fs = 0.28 * (fl.scale || 1);
         ctx.scale(fs, fs);
         ctx.translate(0, -FX.flash.fh / 2);      // barrel sits at the left edge
         fxDraw(FX.flash, ffi, 1);
