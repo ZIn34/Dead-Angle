@@ -47,9 +47,9 @@
   // the target's velocity they compensate for.  smart: cover discipline -
   // breaking contact to reload, flanking a noise instead of walking into it.
   var DIFF = [
-    { react: 0.52, spread: 0.105, sight: 225, rate: 1.30, ear: 0.72, dmg: 0.70, turn: 5.0,  lead: 0.25, smart: false, aimTol: 0.20 },
-    { react: 0.28, spread: 0.050, sight: 275, rate: 1.00, ear: 1.00, dmg: 0.92, turn: 8.5,  lead: 0.75, smart: true,  aimTol: 0.15 },
-    { react: 0.14, spread: 0.022, sight: 330, rate: 0.80, ear: 1.20, dmg: 1.00, turn: 12.0, lead: 1.00, smart: true,  aimTol: 0.10 }
+    { react: 0.52, spread: 0.135, sight: 225, rate: 1.30, ear: 0.72, dmg: 0.42, turn: 5.0,  lead: 0.25, smart: false, aimTol: 0.20 },
+    { react: 0.28, spread: 0.078, sight: 275, rate: 1.00, ear: 1.00, dmg: 0.55, turn: 8.5,  lead: 0.75, smart: true,  aimTol: 0.15 },
+    { react: 0.14, spread: 0.042, sight: 330, rate: 0.80, ear: 1.20, dmg: 0.70, turn: 12.0, lead: 1.00, smart: true,  aimTol: 0.10 }
   ];
 
   // Zone radii are fractions of the map's short side, so every map closes well.
@@ -1183,6 +1183,10 @@
   var zombClock = 0, zombSpawnT = 0;
   var teamNadeT = [0, 0];            // a whole side shares one throwing window
   var botFrags = 0;                  // thrown by bots this match, for tuning
+  var botShots = 0, targetSwaps = 0; // diagnostics
+  var godMode = false;               // testing only: the player cannot be hurt
+  var matchToken = 0;                // bumps every match, so stale timers can tell
+  var hitCause = 'gun', killCauses = {};
   var ZOMB_CAP = 14;
 
   function zombiesUp() {
@@ -1243,7 +1247,7 @@
       alertX: 0, alertY: 0, alertT: 0,
       strafe: Math.random() < 0.5 ? 1 : -1, strafeT: rr(0.6, 1.6),
       senseT: Math.random() * 0.2, stuckT: 0, lastX: 0, lastY: 0, swapT: 0,
-      nadeT: rr(3, 9), smokeT: rr(5, 14),
+      nadeT: rr(3, 9), smokeT: rr(5, 14), skip: {},
       animT: Math.random(), animFire: 0, moving: false,
       _spd: 0, kills: 0, skin: 0, team: 0, down: false, downT: 0, revT: 0
     };
@@ -1487,6 +1491,7 @@
   // ---------------------------------------------------------------- match
   function startMatch() {
     initAudio();
+    matchToken++;
     MODE = MODES[mode];
     VIEW_R = blackout ? VIEW_BLACKOUT : VIEW_BASE;
     var FOOTPRINT = {
@@ -1501,7 +1506,7 @@
     explored.fill(0);
     ents = []; bullets = []; sounds = []; parts = []; flashes = []; corpses = []; loot = [];
     decals = []; impacts = []; deaths = []; nades = []; flags = []; smokes = []; sectors = []; secTick = 0;
-    teamNadeT = [0, 0]; botFrags = 0;
+    teamNadeT = [0, 0]; botFrags = 0; botShots = 0; targetSwaps = 0; killCauses = {};
     dmgMarks = []; shake = 0; promptItem = null;
     alive = MODE.field; matchTime = 0; shots = 0; hits = 0; kills = 0;
     score = [0, 0]; round = 1; roundBreak = 0; roundClock = 75;
@@ -1640,6 +1645,7 @@
       });
     }
     slot.ammo--;
+    if (e.bot) botShots++;
     e.fireT = w.interval * (e.bot ? DIFF[difficulty].rate : 1);
     e.animFire = 0.17;
     var fdur = blackout ? 0.16 : (FX.flash ? FX.flash.frames / FX.flash.fps : 0.075);
@@ -1650,6 +1656,7 @@
     });
     emit(e.x, e.y, w.snd, e.id, 'shot');
     if (e === player) { shots++; shake = Math.min(shake + (w.pellets > 1 ? 3 : 1.6), 6); }
+    return true;
   }
   function startReload(e) {
     var w = curW(e);
@@ -1718,7 +1725,9 @@
       var d = Math.sqrt((e.x - g.x) * (e.x - g.x) + (e.y - g.y) * (e.y - g.y));
       if (d > R || !lineClear(g.x, g.y, e.x, e.y)) continue;
       var dmg = 88 * (1 - d / R) + 14;
+      hitCause = 'frag';
       damage(e, dmg, g.owner, Math.atan2(e.y - g.y, e.x - g.x));
+      hitCause = 'gun';
     }
     if (dist({ x: g.x, y: g.y }, player) < R * 1.6) shake = Math.min(shake + 9, 14);
   }
@@ -1852,7 +1861,9 @@
       var diff = ((Math.atan2(dy, dx) - e.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
       if (Math.abs(diff) > 1.0) continue;
       if (!lineClear(e.x, e.y, o.x, o.y)) continue;
+      hitCause = 'melee';
       damage(o, isZombie(e) ? 13 : 48, e.id, Math.atan2(dy, dx));
+      hitCause = 'gun';
       hitAny = true;
     }
     if (hitAny && e === player) shake = Math.min(shake + 3, 8);
@@ -1865,6 +1876,7 @@
 
   function damage(e, amount, fromId, ang) {
     if (!e.alive) return;
+    if (godMode && e === player) return;
     e.hp -= amount;
     e.useT = 0;
     spark(e.x, e.y, 5, '255,77,141', 140);
@@ -1878,6 +1890,15 @@
     }
     emit(e.x, e.y, MOVE_SND.hit, e.id, 'hit');
     if (e === player) { shake = Math.min(shake + 3, 9); dmgMarks.push({ ang: ang, t: 1.1 }); }
+    if (e.hp > 0 && e.bot && !e.down) {
+      var atk = ents[fromId];
+      if (atk && atk.alive && foes(e, atk) && e.target !== atk) {
+        if (e.skip) e.skip[atk.id] = -1;
+        e.target = atk;
+        e.reactT = Math.min(e.reactT, DIFF[difficulty].react * 0.5);
+        e.lostT = 0;
+      }
+    }
     if (e.hp <= 0) kill(e, fromId);
     else if (e.bot && !e.target) {
       var src = ents[fromId];
@@ -1914,6 +1935,8 @@
       if (deaths.length > 60) deaths.shift();
       deaths.push({ x: e.x, y: e.y, ang: Math.random() * 6.2832, t: 0, scale: rr(0.95, 1.25) });
     }
+    var cause = fromId < 0 ? 'zone/bleed' : hitCause;
+    killCauses[cause] = (killCauses[cause] || 0) + 1;
     dropKit(e);
     var killer = ents[fromId];
     var kn = killer ? killer.name : 'THE ZONE';
@@ -2044,15 +2067,20 @@
     result = { big: big, small: small, won: won, earned: earned };
     overCause = msg + '  +' + earned + ' credits.';
     state = 'ending';
+    // Everything the results screen needs is captured now: if a new match has
+    // started by the time this fires, it must leave that match alone.
+    var tok = matchToken, res = result, why = overCause;
+    var k = kills, t = matchTime, sh = shots, ht = hits;
     setTimeout(function () {
+      if (tok !== matchToken) return;
       state = 'over';
-      $('placeN').textContent = result.big;
-      $('placeN').className = result.won ? 'win' : '';
-      $('placeL').textContent = result.small;
-      $('overMsg').textContent = overCause;
-      $('stKills').textContent = kills;
-      $('stTime').textContent = fmtTime(matchTime);
-      $('stAcc').textContent = (shots ? Math.round(hits / shots * 100) : 0) + '%';
+      $('placeN').textContent = res.big;
+      $('placeN').className = res.won ? 'win' : '';
+      $('placeL').textContent = res.small;
+      $('overMsg').textContent = why;
+      $('stKills').textContent = k;
+      $('stTime').textContent = fmtTime(t);
+      $('stAcc').textContent = (sh ? Math.round(ht / sh * 100) : 0) + '%';
       elHud.hidden = true;
       elOver.hidden = false;
     }, 850);
@@ -2113,14 +2141,39 @@
       // In blackout nobody can see - bots go as blind as you do and have to
       // work off sound and muzzle flashes like everyone else.
       var sightR = blackout ? VIEW_BLACKOUT * (0.95 + difficulty * 0.13) : D.sight;
-      var best = null, bestScore = -1;
+      var best = null, bestScore = -1, curScore = -1;
       for (var i = 0; i < ents.length; i++) {
         var o = ents[i];
         if (o === e || !o.alive || !foes(e, o)) continue;
         var d = dist(e, o);
-        if (d >= sightR || !sightClear(e.x, e.y, o.x, o.y)) continue;
+        // In a free-for-all every face is an enemy. Only pick a NEW fight up
+        // close - unless you are carrying the sniper - and keep your current
+        // one out to full sight.
+        var reach2 = sightR;
+        if (mode === 'br' && o !== e.target) {
+          var cw3 = curW(e);
+          if (!(cw3 && cw3.snd.maxR >= 1900)) reach2 = sightR * 0.62;
+        }
+        if (d >= reach2 || !sightClear(e.x, e.y, o.x, o.y)) continue;
+        if (mode === 'br' && o !== e.target) {
+          if ((e.skip[o.id] || 0) > matchTime) continue;          // already let them go
+          if (e.skip[o.id] === undefined || e.skip[o.id] <= matchTime) {
+            // early on most people avoid a fight; later it is kill or be killed
+            var takeIt = Math.random() < (matchTime < 75 ? 0.3 : 0.62);
+            if (!takeIt) { e.skip[o.id] = matchTime + rr(4, 8); continue; }
+            e.skip[o.id] = -1;                                    // decided: fight
+          }
+        }
         var sc = (1 - d / sightR) + (1 - o.hp / 100) * 0.6;   // finish the wounded one
+        if (o === e.target) curScore = sc;
         if (sc > bestScore) { bestScore = sc; best = o; }
+      }
+      // Stay on whoever you are already shooting while they are in sight,
+      // unless someone else is clearly the better shot. Flipping between
+      // targets every tick used to keep resetting the reaction delay, so a
+      // bot would fire once and then never again.
+      if (best && e.target && best !== e.target && curScore >= 0 && bestScore < curScore + 0.3) {
+        best = e.target;
       }
       // the infected do not need to see you
       if (!best && isZombie(e)) {
@@ -2134,12 +2187,15 @@
         best = near2;
       }
       if (best) {
-        if (e.target !== best) e.reactT = D.react;
+        if (e.target !== best) {
+          e.reactT = e.target ? D.react * 0.3 : D.react;   // already fighting: quick switch
+          targetSwaps++;
+        }
         e.target = best; e.lostT = 0;
         e.alertX = best.x; e.alertY = best.y; e.alertT = 6;
       } else if (e.target) {
         e.lostT += 0.15;
-        if (e.lostT > 1.4) { e.target = null; e.path = null; }
+        if (e.lostT > (mode === 'br' ? 0.45 : 1.4)) { e.target = null; e.path = null; }
       }
     }
     if (e.target && !e.target.alive) { e.target = null; e.path = null; }
@@ -2254,6 +2310,15 @@
         else { var rt = floorTiles[rnd(floorTiles.length)]; pathTo(e, rt.x * TILE, rt.y * TILE, 3.0); }
       }
       if (followPath(e, dt, speed)) footstep(e, dt, false);
+    } else if (e.target && e.reactT <= 0 && mode !== 'br' && !sightClear(e.x, e.y, e.target.x, e.target.y)) {
+      // They ducked behind something. Strafing on the spot never gets the
+      // shot back - push to where they were last seen and take the corner.
+      if (!e.path || e.pathI >= e.path.length || e.repathT <= 0) pathTo(e, e.alertX, e.alertY, 0.6);
+      if (!followPath(e, dt, speed)) {
+        var cdx = e.alertX - e.x, cdy = e.alertY - e.y, cl2 = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
+        moveEnt(e, cdx / cl2 * speed * dt, cdy / cl2 * speed * dt);
+      }
+      footstep(e, dt, false);
     } else if (e.target && e.reactT <= 0) {
       var t = e.target, td = dist(e, t);
       e.swapT -= dt;
@@ -2299,7 +2364,9 @@
           var want = null, following = false;
           if (MODE.loot) {
             if (e.hp < 65 && e.meds === 0) want = nearestLoot(e, 'med', 800);
-            if (!want && e.reserve < 40) want = nearestLoot(e, 'ammo', 700);
+            if (!want && e.reserve < (mode === 'br' ? 80 : 40)) want = nearestLoot(e, 'ammo', 700);
+            // fill both hands before going looking for trouble
+            if (!want && mode === 'br' && (!e.slots[0] || !e.slots[1])) want = nearestLoot(e, 'gun', 900);
           }
           // squadmates regroup on you instead of wandering off alone
           if (MODE.sectors && sectors.length) {
@@ -2342,7 +2409,10 @@
             var ndx = e.x - zone.nx, ndy = e.y - zone.ny;
             if (Math.sqrt(ndx * ndx + ndy * ndy) > zone.nr - 60) want = { x: zone.nx, y: zone.ny };
           }
-          if (!want && Math.random() < 0.7) {
+          // In battle royale the zone brings people together; hunting on top
+          // of it turned the first minute into a bloodbath. Elsewhere there
+          // is nothing else to close the distance, so they go looking.
+          if (!want && Math.random() < (mode === 'br' ? 0.18 : 0.7)) {
             var hunt = [];
             for (var hq = 0; hq < ents.length; hq++) {
               var ho = ents[hq];
@@ -2459,9 +2529,10 @@
         else if (slot.ammo <= 0) startReload(e);
         else {
           if (e.burst <= 0) e.burst = w.pellets > 1 ? 1 : (w.interval < 0.12 ? 6 + rnd(6) : 3 + rnd(3));
-          fire(e);
-          e.burst--;
-          if (e.burst <= 0) e.fireT += rr(0.06, 0.16);
+          if (fire(e)) {
+            e.burst--;
+            if (e.burst <= 0) e.fireT += rr(0.06, 0.16);
+          }
         }
       }
       // top up the magazine the moment contact breaks
@@ -2637,7 +2708,10 @@
         if (d > s.maxR * ear) { s.heard[e.id] = 1; continue; }
         if (d <= s.r) {
           s.heard[e.id] = 1;
-          if (!e.target) {
+          // In battle royale, a distant firefight is usually someone else's
+          // problem - most bots keep looting instead of all piling in.
+          var shrug = mode === 'br' && s.kind === 'shot' && d > 450 && Math.random() < 0.68;
+          if (!e.target && !shrug) {
             // sharper ears place the noise more precisely
             var err = 60 * (1.6 - ear);
             e.alertX = s.x + rr(-err, err); e.alertY = s.y + rr(-err, err);
@@ -2691,7 +2765,7 @@
       if (!e.alive) continue;
       var dx = e.x - zone.cx, dy = e.y - zone.cy;
       if (Math.sqrt(dx * dx + dy * dy) > zone.r) {
-        e.hp -= zone.dps * dt;
+        if (!(godMode && e === player)) e.hp -= zone.dps * dt;
         if (e.hp <= 0) kill(e, -1);
         else if (e === player && Math.random() < dt * 3) dmgMarks.push({ ang: Math.atan2(dy, dx), t: 0.5 });
       }
@@ -3232,6 +3306,8 @@
   window.EARSHOT = {
     loadSprites: loadSprites, loadSheet: loadSheet, loadFx: loadFx,
     loadPack: loadPack, sprites: SPRITES,
+    // testing only: make the player unkillable so a sim runs bot-vs-bot
+    god: function (on) { godMode = !!on; return godMode; },
     // advance the simulation without drawing, for testing behaviour
     step: function (seconds, dt) {
       dt = dt || 1 / 60;
@@ -3246,8 +3322,12 @@
     bots: function () {
       return ents.filter(function (e) { return e.bot; }).map(function (e) {
         var sl = curSlot(e);
+        var t = e.target, td = t ? dist(e, t) : 0;
         return { n: e.name, alive: e.alive, team: e.team, gun: sl ? sl.key : null,
-                 mag: sl ? sl.ammo : 0, reserve: e.reserve, reloading: e.reloadT > 0 };
+                 mag: sl ? sl.ammo : 0, reserve: e.reserve, reloading: e.reloadT > 0,
+                 hasTarget: !!t, react: +e.reactT.toFixed(2), lost: +e.lostT.toFixed(2),
+                 dist: Math.round(td), inSight: t ? sightClear(e.x, e.y, t.x, t.y) : false,
+                 fireT: +e.fireT.toFixed(2), healing: e.useT > 0, down: e.down };
       });
     },
     // a read-only peek at the simulation, for diagnosing behaviour
@@ -3268,6 +3348,7 @@
       }
       return {
         mode: mode, live: live, armed: armed, withTarget: withTarget, botFrags: botFrags,
+        botShots: botShots, targetSwaps: targetSwaps, killCauses: killCauses,
         minEnemyDist: Math.round(minEnemy), bullets: bullets.length,
         sounds: sounds.length, shotsByPlayer: shots,
         sight: DIFF[difficulty].sight, mapW: MAP_W
