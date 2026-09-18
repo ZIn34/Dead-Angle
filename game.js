@@ -380,14 +380,15 @@
     }
 
     var builds = [];
-    var wantBuilds = Math.max(8, Math.round(span * span / 320));
+    // a few towns' worth of buildings on a lot of open ground
+    var wantBuilds = Math.max(5, Math.round(span * span / 1150));
     for (i = 0; i < 1400 && builds.length < wantBuilds; i++) {
       var bw = 7 + rnd(9), bh = 7 + rnd(9);
       var bx = 4 + rnd(MAP_W - bw - 8), by = 4 + rnd(MAP_H - bh - 8);
       var ok = true;
       for (j = 0; j < builds.length; j++) {
         var o = builds[j];
-        if (bx - 5 < o.x + o.w && bx + bw + 5 > o.x && by - 5 < o.y + o.h && by + bh + 5 > o.y) { ok = false; break; }
+        if (bx - 12 < o.x + o.w && bx + bw + 12 > o.x && by - 12 < o.y + o.h && by + bh + 12 > o.y) { ok = false; break; }
       }
       if (!ok) continue;
       builds.push({ x: bx, y: by, w: bw, h: bh });
@@ -416,7 +417,7 @@
 
     // scattered cover out in the open - bushes and rocks, not masonry
     curMat = 2;
-    var wantCover = Math.max(60, Math.round(span * span / 30));
+    var wantCover = Math.max(50, Math.round(span * span / 44));
     for (i = 0; i < wantCover; i++) {
       var cxx = 3 + rnd(MAP_W - 6), cyy = 3 + rnd(MAP_H - 6);
       var inside = false;
@@ -1341,7 +1342,7 @@
     });
     function spot() {
       // on the world map, most loot sits inside the buildings
-      if (insideTiles.length && Math.random() < 0.72) return insideTiles[rnd(insideTiles.length)];
+      if (insideTiles.length && Math.random() < 0.5) return insideTiles[rnd(insideTiles.length)];
       return floorTiles[rnd(floorTiles.length)];
     }
     var i, t2;
