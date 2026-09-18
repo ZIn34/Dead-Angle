@@ -2844,12 +2844,7 @@
     }
     var g = getPad(c.pad);
     if (!e.padPrev) e.padPrev = {};
-    if (g) {
-      var busy = false, j;
-      for (j = 0; j < g.buttons.length; j++) if (g.buttons[j] && g.buttons[j].pressed) { busy = true; break; }
-      if (!busy) for (j = 0; j < g.axes.length; j++) if (Math.abs(g.axes[j]) > 0.45) { busy = true; break; }
-      if (busy) e.padLast = performance.now();
-    }
+    if (g && padBusy(g)) e.padLast = performance.now();
     return {
       any: false, pad: g,
       hit: function (i) { return hitOf(g, e.padPrev, i); },
@@ -3640,6 +3635,7 @@
       for (var i = 0; i < n && netGuest && state === 'play'; i++) guestTick(1 / 60);
       return window.EARSHOT.net();
     },
+    padInfo: function () { return { active: padActive(), padLast: padLast, kbmLast: kbmLast, rest: padRest, now: performance.now() }; },
     net: function () {
       return { role: netRole, guest: netGuest, open: !!(netConn && netConn.open), sent: netStat.sent, recv: netStat.recv,
                err: netStat.err, queue: netQueue.length, hasPlayer: !!player, ents: ents.length, state: state };
@@ -4336,6 +4332,15 @@
     }
     var sx3 = (player.x + cx3 * d - cam.x) * zoom + cw / 2;
     var sy3 = (player.y + cy3 * d - cam.y) * zoom + ch / 2;
+    var ox3 = (player.x + cx3 * (player.r + 10) - cam.x) * zoom + cw / 2;
+    var oy3 = (player.y + cy3 * (player.r + 10) - cam.y) * zoom + ch / 2;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(124,231,216,.45)';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([2, 7]);
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(ox3, oy3); ctx.lineTo(sx3, sy3); ctx.stroke();
+    ctx.restore();
     ctx.fillStyle = 'rgba(124,231,216,.9)';
     ctx.beginPath(); ctx.arc(sx3, sy3, 2.6, 0, 6.2832); ctx.fill();
     ctx.strokeStyle = 'rgba(124,231,216,.32)';
@@ -4784,10 +4789,18 @@
     if (!c || c.any) return padActive();
     if (c.pad < 0) return false;
     if (!c.kb) return true;
-    return (performance.now() - (e.padLast || -1e9)) < 10000;
+    return (e.padLast || -1e9) > kbmLast && (performance.now() - (e.padLast || -1e9)) < 10000;
   }
 
   var pad = null, padPrev = {}, padSeen = false, padLast = -1e9;
+  var padRest = {}, kbmLast = -1e9;
+  function padBusy(g) {
+    var rest = padRest[g.index];
+    if (!rest) { rest = padRest[g.index] = g.axes.slice(); return false; }
+    for (var j = 0; j < g.buttons.length; j++) if (g.buttons[j] && g.buttons[j].pressed) return true;
+    for (j = 0; j < g.axes.length; j++) if (Math.abs(g.axes[j] - (rest[j] || 0)) > 0.45) return true;
+    return false;
+  }
   function pollPad() {
     var list = navigator.getGamepads ? navigator.getGamepads() : null;
     pad = null;
@@ -4798,12 +4811,11 @@
     if (!pad) return;
     // note when the stick or a button was last touched, so the prompts can
     // switch between keyboard and controller on their own
-    var busy = false, j;
-    for (j = 0; j < pad.buttons.length; j++) if (pad.buttons[j] && pad.buttons[j].pressed) { busy = true; break; }
-    if (!busy) for (j = 0; j < pad.axes.length; j++) if (Math.abs(pad.axes[j]) > 0.45) { busy = true; break; }
-    if (busy) padLast = performance.now();
+    if (padBusy(pad)) padLast = performance.now();
   }
-  function padActive() { return !!pad && (performance.now() - padLast) < 10000; }
+  function padActive() {
+    return !!pad && padLast > kbmLast && (performance.now() - padLast) < 10000;
+  }
   // Prompts read as whatever you are actually holding.
   function promptKey(keyLabel, padLabel) { return usingPad(player) ? padLabel : keyLabel; }
   function padAxis(i) {
@@ -4902,6 +4914,7 @@
     mouse.wy = (mouse.sy - vy - vh / 2) / z + c.y;
   }
   canvas.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType !== 'touch') kbmLast = performance.now();
     var r = canvas.getBoundingClientRect();
     if (ev.pointerType === 'touch') {
       touchMode = true;
@@ -4914,6 +4927,7 @@
     ev.preventDefault();
   });
   canvas.addEventListener('pointermove', function (ev) {
+    if (ev.pointerType !== 'touch' && (Math.abs(ev.movementX || 0) + Math.abs(ev.movementY || 0)) > 2) kbmLast = performance.now();
     var r = canvas.getBoundingClientRect();
     var px = ev.clientX - r.left, py = ev.clientY - r.top;
     if (ev.pointerType === 'touch') {
@@ -4932,6 +4946,7 @@
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   window.addEventListener('keydown', function (e) {
+    kbmLast = performance.now();
     var k = e.key.toLowerCase();
     keys[k] = true;
     if (netGuest && state === 'play') {
