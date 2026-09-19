@@ -1774,6 +1774,12 @@
       var side = rr(-1, 1) * GLIDE_SPEED * CHUTE_TIME * 0.95, ahead = rr(0, 0.5) * GLIDE_SPEED * CHUTE_TIME;
       e.landX = clamp(e.x - plane.dy * side + plane.dx * ahead, TILE * 3, WORLD_W - TILE * 3);
       e.landY = clamp(e.y + plane.dx * side + plane.dy * ahead, TILE * 3, WORLD_H - TILE * 3);
+      if (zone) {
+        // pull the spot inside the circle (with room to spare)
+        var lzx = e.landX - zone.cx, lzy = e.landY - zone.cy, lzd = Math.sqrt(lzx * lzx + lzy * lzy) || 1;
+        var safeR = zone.r * 0.8;
+        if (lzd > safeR) { e.landX = zone.cx + lzx / lzd * safeR; e.landY = zone.cy + lzy / lzd * safeR; }
+      }
     }
     if (e.local) audioEmit(e.x, e.y, PICK_SND, e.id);
     // a partner bot bails out right behind you
@@ -2821,10 +2827,12 @@
   function botThink(e, dt) {
     var D = DIFF[difficulty];
 
+    // healing: like a player, a bot can keep moving while the stim goes in
+    // (it just cannot shoot) - freezing on the spot left them standing in
+    // the storm
     if (e.useT > 0) {
       e.useT -= dt;
       if (e.useT <= 0) e.hp = Math.min(100, e.hp + 45);
-      return;
     }
 
     // --- senses
@@ -2899,11 +2907,17 @@
     var w = curW(e), slot = curSlot(e);
 
     var dry = !w || (slot.ammo <= 0 && e.reserve <= 0);
-    var zd = 0, outside = false;
+    var zd = 0, outside = false, zgx = 0, zgy = 0, zgr = 0;
     if (zone) {
       var zdx = e.x - zone.cx, zdy = e.y - zone.cy;
       zd = Math.sqrt(zdx * zdx + zdy * zdy);
       outside = zd > zone.r - 40;
+      zgx = zone.cx; zgy = zone.cy; zgr = zone.r;
+      // the circle is shrinking: get inside where it will stop, not where it is
+      if (zone.closing) {
+        var tdx = e.x - zone.tx, tdy = e.y - zone.ty, td = Math.sqrt(tdx * tdx + tdy * tdy);
+        if (td > zone.shrinkTo - 50) { outside = true; zgx = zone.tx; zgy = zone.ty; zgr = zone.shrinkTo; zd = td; }
+      }
     }
     var speed = isZombie(e) ? 150 : (w ? 165 : 186);
     e.repathT -= dt;
@@ -2932,8 +2946,8 @@
     if (outside) {
       speed = w ? 232 : 254;
       if (!e.path || e.repathT <= 0) {
-        pathTo(e, zone.cx + ((e.x - zone.cx) / (zd || 1)) * zone.r * 0.45,
-                  zone.cy + ((e.y - zone.cy) / (zd || 1)) * zone.r * 0.45, 2.2);
+        pathTo(e, zgx + ((e.x - zgx) / (zd || 1)) * zgr * 0.45,
+                  zgy + ((e.y - zgy) / (zd || 1)) * zgr * 0.45, 2.2);
       }
       followPath(e, dt, speed);
       footstep(e, dt, true);
@@ -4154,6 +4168,13 @@
       return window.EARSHOT.net();
     },
     queueTest: function () { goPublicHost(); },
+    botInfo: function (id) {
+      var e = ents[id]; if (!e) return null;
+      return { x: Math.round(e.x), y: Math.round(e.y), alive: e.alive, down: e.down, air: e.air, hp: Math.round(e.hp),
+               path: e.path ? e.path.length : null, pathI: e.pathI, repathT: +(e.repathT || 0).toFixed(2), stuckT: +(e.stuckT || 0).toFixed(2),
+               target: e.target ? e.target.id : null, tile: [Math.floor(e.x / TILE), Math.floor(e.y / TILE)], wallHere: wallAt(e.x, e.y) };
+    },
+    zoneInfo: function () { return zone ? { cx: Math.round(zone.cx), cy: Math.round(zone.cy), r: Math.round(zone.r), closing: zone.closing, phase: zone.phase } : null; },
     // test: have entity `from` land a hit of `amount` on you
     hurt: function (from, amount, victim) {
       var k = ents[from], v = victim === undefined ? player : ents[victim];
