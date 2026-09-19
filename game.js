@@ -3690,7 +3690,7 @@
     aimInfo: function () {
       return { sx: mouse.sx, sy: mouse.sy, wx: mouse.wx, wy: mouse.wy, camX: cam.x, camY: cam.y,
                pcam: player && player.cam === cam, px: player && player.x, py: player && player.y, ang: player && player.ang,
-               leadX: player && player.leadX, zoom: zoom, pzoom: player && player.zoom, cw: cw, ch: ch, vw: player && player.vw,
+               leadX: player && player.leadX, zoom: zoom, pzoom: player && player.zoom, cw: cw, ch: ch, vw: player && player.viewW, velY: player && player.vy,
                padOn: padActive(), touch: touchMode, down: mouse.down };
     },
     net: function () {
@@ -3818,7 +3818,7 @@
 
     if (!splitOn) {
       VX = 0; VY = 0; VW = cw; VH = ch;
-      player.vx = 0; player.vy = 0; player.vw = cw; player.vh = ch; player.zoom = zoom;
+      player.viewX = 0; player.viewY = 0; player.viewW = cw; player.viewH = ch; player.zoom = zoom;
       renderScene();
       return;
     }
@@ -3831,7 +3831,8 @@
       var L = locals[pi];
       if (side) { VX = Math.round(pi * fullW / 2); VY = 0; VW = Math.round(fullW / 2); VH = fullH; }
       else { VX = 0; VY = Math.round(pi * fullH / 2); VW = fullW; VH = Math.round(fullH / 2); }
-      L.vx = VX; L.vy = VY; L.vw = VW; L.vh = VH;
+      // (viewX..: vx/vy on an entity are its velocity - never reuse those)
+      L.viewX = VX; L.viewY = VY; L.viewW = VW; L.viewH = VH;
       L.zoom = Math.max(0.5, Math.min(2.4, Math.min(VW, VH) / (VIEW_BASE * 2 + 60)));
       cw = VW; ch = VH; zoom = L.zoom; player = L; cam = L.cam; promptItem = L.prompt;
       ctx.save();
@@ -4951,7 +4952,7 @@
   function updateMouseWorld() {
     if (mouse.sx === undefined || !player) return;
     var L = kbPlayer(), c = L.cam || cam;
-    var vx = L.vw ? L.vx : 0, vy = L.vh ? L.vy : 0, vw = L.vw || cw, vh = L.vh || ch, z = L.zoom || zoom;
+    var vx = L.viewW ? L.viewX : 0, vy = L.viewH ? L.viewY : 0, vw = L.viewW || cw, vh = L.viewH || ch, z = L.zoom || zoom;
     mouse.wx = (mouse.sx - vx - vw / 2) / z + c.x;
     mouse.wy = (mouse.sy - vy - vh / 2) / z + c.y;
   }
