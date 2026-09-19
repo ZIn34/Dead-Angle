@@ -2861,6 +2861,7 @@
     }
     if (c.any) {
       return { any: true, pad: pad, hit: padHit, down: padDown, ax: padAxis,
+               raw: function () { return pad && pad.axes.length > 3 ? [pad.axes[2], pad.axes[3]] : [0, 0]; },
                kb: true, touch: true, padOn: padActive() };
     }
     var g = getPad(c.pad);
@@ -2871,6 +2872,7 @@
       hit: function (i) { return hitOf(g, e.padPrev, i); },
       down: function (i) { return downOf(g, i); },
       ax: function (i) { return axOf(g, i); },
+      raw: function () { return g && g.axes.length > 3 ? [g.axes[2], g.axes[3]] : [0, 0]; },
       kb: !!c.kb, touch: false, padOn: usingPad(e)
     };
   }
@@ -2947,13 +2949,25 @@
 
     // Face the right stick if it is pushed; otherwise where you are walking on
     // a pad; otherwise the cursor. Never left pointing at nothing.
-    var rx = I.pad ? I.ax(2) : 0, ry = I.pad ? I.ax(3) : 0;
-    // A stick springing back to centre passes through tiny readings that
-    // point anywhere; only a clear push changes where you aim.
-    if (!I.net && rx * rx + ry * ry < 0.09) { rx = 0; ry = 0; }
+    // Right stick. Read raw, so the angle is true in every direction (a
+    // per-axis deadzone bends diagonals). Any push past the deadzone means
+    // "I am aiming" - walking never steals your aim then - but only a firm
+    // push turns you, so a stick springing back to centre does not flick.
+    var rx = 0, ry = 0, nowA = performance.now();
+    if (I.net) { rx = I.ax(2); ry = I.ax(3); }
+    else if (I.pad && I.raw) {
+      var ra = I.raw(), rm = Math.sqrt(ra[0] * ra[0] + ra[1] * ra[1]), dz = SET.dead / 100;
+      if (rm >= dz) {
+        e.stickAimAt = nowA;
+        if (rm >= dz + 0.1) { rx = ra[0]; ry = ra[1]; }
+      }
+    }
+    var aimingStick = nowA - (e.stickAimAt || -1e9) < 600;
     if (rx || ry) {
-      e.stickAimAt = performance.now();
+      e.stickAimAt = nowA;
       e.ang = Math.atan2(ry, rx);
+    } else if (aimingStick) {
+      // holding the aim where the stick last put it
     } else if (I.touch && sticks.aim) {
       var adx = sticks.aim.x - sticks.aim.ox, ady = sticks.aim.y - sticks.aim.oy;
       if (Math.sqrt(adx * adx + ady * ady) > 10) e.ang = Math.atan2(ady, adx);
@@ -5233,7 +5247,7 @@
   // ---------------------------------------------------------------- online
   var PEER_JS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
   var netEv = [], netDefs = [], netSendT = 0, netSigs = {}, guestHits = 0, netInT = 0;
-  var netQueue = [], guestYou = -1, netLastIn = '', quickFail = null;
+  var netQueue = [], guestYou = -1, netLastIn = '', quickFail = null, guestStickAt = -1e9;
   var netStat = { sent: 0, recv: 0, err: '' };
   var WKEYS = Object.keys(WEAPONS);
 
@@ -5740,8 +5754,10 @@
     if (!netGuestPaused) {
       if (pad) {
         mx = padAxis(0); my = padAxis(1);
-        var rx = padAxis(2), ry = padAxis(3);
-        if (rx * rx + ry * ry >= 0.09) aim = Math.atan2(ry, rx);
+        var rx = pad.axes[2] || 0, ry = pad.axes[3] || 0, rm = Math.sqrt(rx * rx + ry * ry), dz = SET.dead / 100;
+        if (rm >= dz) guestStickAt = performance.now();
+        if (rm >= dz + 0.1) aim = Math.atan2(ry, rx);
+        else if (performance.now() - guestStickAt < 600) aim = player.ang;   // keep it where it was
         var PB = [0, 1, 2, 3, 5, 6, 14, 15, 12];
         for (i = 0; i < PB.length; i++) if (padHit(PB[i])) hitsNow |= 1 << (PB[i] === 15 ? 14 : (PB[i] === 12 ? 3 : PB[i]));
         if (padHit(9)) pause();
