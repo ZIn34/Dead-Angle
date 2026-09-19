@@ -50,9 +50,9 @@
   // the target's velocity they compensate for.  smart: cover discipline -
   // breaking contact to reload, flanking a noise instead of walking into it.
   var DIFF = [
-    { react: 0.52, spread: 0.135, sight: 225, rate: 1.30, ear: 0.72, dmg: 0.42, turn: 5.0,  lead: 0.25, smart: false, aimTol: 0.20, miss: 0.42, settle: 0.9, wob: 0.17 },
-    { react: 0.28, spread: 0.078, sight: 275, rate: 1.00, ear: 1.00, dmg: 0.55, turn: 8.5,  lead: 0.75, smart: true,  aimTol: 0.15, miss: 0.36, settle: 1.2, wob: 0.14 },
-    { react: 0.14, spread: 0.042, sight: 330, rate: 0.80, ear: 1.20, dmg: 0.70, turn: 12.0, lead: 1.00, smart: true,  aimTol: 0.10, miss: 0.28, settle: 1.6, wob: 0.105 }
+    { react: 0.52, spread: 0.135, sight: 225, rate: 1.30, ear: 0.72, dmg: 0.42, turn: 5.0,  lead: 0.25, smart: false, aimTol: 0.20, miss: 0.42, settle: 0.9, wob: 0.17, track: 1.8 },
+    { react: 0.28, spread: 0.078, sight: 275, rate: 1.00, ear: 1.00, dmg: 0.55, turn: 8.5,  lead: 0.75, smart: true,  aimTol: 0.15, miss: 0.36, settle: 1.2, wob: 0.14, track: 2.4 },
+    { react: 0.14, spread: 0.042, sight: 330, rate: 0.80, ear: 1.20, dmg: 0.70, turn: 12.0, lead: 1.00, smart: true,  aimTol: 0.10, miss: 0.28, settle: 1.6, wob: 0.105, track: 3.4 }
   ];
 
   // Zone radii are fractions of the map's short side, so every map closes well.
@@ -1246,7 +1246,7 @@
   var teamNadeT = [0, 0];            // a whole side shares one throwing window
   var botFrags = 0;                  // thrown by bots this match, for tuning
   var botShots = 0, targetSwaps = 0; // diagnostics
-  var botHits = 0, aimErrOn = true;
+  var botHits = 0, aimErrOn = true, botHitsOnYou = 0;
   var godMode = false;               // testing only: the player cannot be hurt
   var matchToken = 0;                // bumps every match, so stale timers can tell
   var hitCause = 'gun', killCauses = {};
@@ -2521,6 +2521,7 @@
     if (!e.alive) return;
     var hitBy = ents[fromId];
     if (hitBy && hitBy.bot && hitBy !== e) botHits++;
+    if (hitBy && hitBy.bot && e === player) botHitsOnYou++;
     if (mode === 'tut' && e.dummy && hitBy && hitBy.local) tut.hits = (tut.hits || 0) + 1;
     if (godMode && e === player) return;
     e.hp -= amount;
@@ -3245,8 +3246,14 @@
       var tt = e.target, dd = dist(e, tt);
       // lead the shot by the target's own velocity over the bullet's flight
       var tof = dd / w.speed;
-      var aimX = tt.x + tt.vx * tof * D.lead;
-      var aimY = tt.y + tt.vy * tof * D.lead;
+      // The hand trails the eye: aim at where they were a moment ago, catching
+      // up at this bot's pace, and only half-guess where they are going. A
+      // target that keeps moving is genuinely harder to hit.
+      if (e.trkT !== tt) { e.trkT = tt; e.trkX = tt.x; e.trkY = tt.y; }
+      var trk = 1 - Math.exp(-(D.track || 3) * dt);
+      e.trkX += (tt.x - e.trkX) * trk; e.trkY += (tt.y - e.trkY) * trk;
+      var aimX = e.trkX + tt.vx * tof * D.lead * 0.3;
+      var aimY = e.trkY + tt.vy * tof * D.lead * 0.3;
       var want2 = Math.atan2(aimY - e.y, aimX - e.x);
       if (aimErrOn) want2 += aimError(e, tt, dd, dt, D);
       var diff = ((want2 - e.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
@@ -4312,7 +4319,7 @@
       }
       return {
         mode: mode, live: live, armed: armed, withTarget: withTarget, botFrags: botFrags,
-        botShots: botShots, botHits: botHits, targetSwaps: targetSwaps, killCauses: killCauses,
+        botShots: botShots, botHits: botHits, botHitsOnYou: botHitsOnYou, targetSwaps: targetSwaps, killCauses: killCauses,
         minEnemyDist: Math.round(minEnemy), bullets: bullets.length,
         sounds: sounds.length, shotsByPlayer: shots,
         sight: DIFF[difficulty].sight, mapW: MAP_W
