@@ -264,11 +264,11 @@
     if (!def.aud && !def.sample) return;
     // heard from your own spot if it is yours, else from the nearer player
     var oe = owner >= 0 ? ents[owner] : null;
-    var lis = (oe && oe.local) ? oe : nearestLocal(x, y);
+    var lis = onHere(oe) ? oe : nearestLocal(x, y);
     var dx = x - lis.x, dy = y - lis.y;
     var d = Math.sqrt(dx * dx + dy * dy);
     if (d > def.maxR) return;
-    var mine = !!(oe && oe.local);
+    var mine = onHere(oe);
     var fall = 1 - d / def.maxR;
     var gain = mine ? def.aud.vol * 0.9 : def.aud.vol * fall * fall;
     if (gain < 0.008) return;
@@ -1163,6 +1163,7 @@
   }
   function saveWallet() {
     try { localStorage.setItem('earshot.wallet', JSON.stringify(WALLET)); } catch (err) {}
+    if (typeof cloudWallet === 'function') cloudWallet();
   }
   function skinPrice(i) { return i === BASE_SKIN ? 0 : (i >= 12 ? 500 : 200); }
 
@@ -1235,7 +1236,12 @@
   // online: netRole is 'host' or 'guest' while connected; netGuest is true
   // while this machine is drawing a match the host is running
   var netRole = null, netConn = null, netPeer = null, netGuest = false, netGuestPaused = false;
-  var netIn = { ax: [0, 0], aim: null, down: 0, hits: 0 };
+  // host side: everyone connected to us. { conn, name, skin, uid, party, in, ent, sigs }
+  var netGuests = [], netPublic = false, netCode = '';
+  var acctName = '';                 // the signed-in username, if any
+  var NET_MAX = 8;                   // people in one match, host included
+  // on this machine (not merely human - remote guests are local to the host's sim)
+  function onHere(e) { return !!(e && e.local && !(e.ctl && e.ctl.net)); }
   var netGuestSkin = 0, netHostHeld = false;
   // The drop plane: a straight run across the map. Everyone rides it at the
   // start of a battle royale and bails out somewhere along the way.
@@ -1253,6 +1259,7 @@
   function nearestLocal(x, y) {
     var best = player, bd = 1e18;
     for (var i = 0; i < locals.length; i++) {
+      if (!onHere(locals[i])) continue;
       var L = locals[i], d = (L.x - x) * (L.x - x) + (L.y - y) * (L.y - y);
       if (d < bd) { bd = d; best = L; }
     }
@@ -1584,16 +1591,11 @@
     player.local = true; player.ctl = { any: true, kb: true }; player.cam = cam;
     ents.push(player);
     locals = [player]; splitOn = false;
-    var online = netRole === 'host' && netConn && netConn.open;
+    var online = netRole === 'host' && netGuests.length > 0;
     var sc = online ? null : (splitWant ? splitControls() : null);
     if (!online && splitWant && !sc) feed('split screen needs a <b>controller</b> for player 2', true);
-    if (online) {
-      var pn = makeEnt(sp[1 % sp.length], true, 'P2');
-      pn.local = true; pn.ctl = { net: true }; pn.cam = { x: 0, y: 0 };
-      player.name = 'P1';
-      ents.push(pn); locals.push(pn);
-      netIn = { ax: [0, 0], aim: null, down: 0, hits: 0 };
-    }
+    if (netRole === 'host') player.name = acctName || 'HOST';
+    for (var gq = 0; gq < netGuests.length; gq++) netGuests[gq].ent = null;
     if (sc) {
       var p2 = makeEnt(sp[1 % sp.length], true, 'P2');
       p2.local = true; p2.ctl = { pad: sc.p2, kb: false }; p2.cam = { x: 0, y: 0 }; p2.padPrev = {};
@@ -1637,7 +1639,7 @@
     player.skin = WALLET.skin;
     if ((locals.length > 1) && !MODE.teams && !MODE.zombies && locals[1].skin === player.skin) locals[1].skin = (player.skin + 5) % 16;
     elHud.classList.toggle('split', splitOn);
-    if (locals.length > 1 && locals[1].ctl.net && !MODE.teams && !MODE.zombies) locals[1].skin = netGuestSkin;
+
     charCache = {};
     ents.forEach(function (e, i) { placeEnt(e, sp[i % sp.length]); });
 
@@ -1664,13 +1666,17 @@
     }
 
     spawnLoot(sp);
+    // friends in the lobby step into bots' bodies before the plane boards
+    if (netRole === 'host') for (var gi = 0; gi < netGuests.length; gi++) admitGuest(netGuests[gi], true);
     plane = null;
     if (mode === 'br') boardPlane();
     elFeed.innerHTML = '';
     elMenu.hidden = true; elOver.hidden = true; elHud.hidden = false; elPaused.hidden = true;
+    $('online').hidden = true; $('account').hidden = true;
     state = 'play';
     syncHud();
-    if (online) netSendStart(locals[1]);
+    if (netRole === 'host') for (var gs = 0; gs < netGuests.length; gs++) if (netGuests[gs].ent) netSendTo(netGuests[gs], startMsg(netGuests[gs]));
+    lobbyTouch();
   }
 
   function boardPlane() {
@@ -1870,7 +1876,7 @@
       ang: e.ang, t: fdur, max: fdur, tint: w.tint, scale: fscale
     });
     emit(e.x, e.y, w.snd, e.id, 'shot');
-    if (e.local) shots++;
+    if (onHere(e)) shots++;
     if (e === player) { shake = Math.min(shake + (w.pellets > 1 ? 3 : 1.6), 6); }
     return true;
   }
@@ -2162,7 +2168,7 @@
     var kn = killer ? killer.name : 'THE ZONE';
     if (killer && killer !== e) killer.kills++;
     if (killer && killer.local && killer !== e) {
-      kills++;
+      if (onHere(killer)) kills++;
       feed('<b>' + ((locals.length > 1) ? killer.name : 'YOU') + '</b> eliminated ' + e.name, true);
     }
     else if (e.local) { feed('<b>' + kn + '</b> eliminated ' + ((locals.length > 1) ? e.name : 'YOU'), true); }
@@ -2231,6 +2237,7 @@
     // battle royale
     alive--;
 
+    if (e.local) e.place = alive + 1;
     if (e.local && !anyLocalAlive()) {
       finish(false, killer && killer !== e
         ? kn + ' put ' + ((locals.length > 1) ? e.name : 'you') + ' down at ' + Math.round(dist(e, killer)) + ' units.'
@@ -2278,13 +2285,20 @@
 
   function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
 
+  // `won` arrives from the host's side of things; turn it into this person's.
+  function wonFor(e, hostWon) {
+    if (MODE.teams || MODE.zombies) return e.team === player.team ? hostWon : !hostWon;
+    if (!lastWinner) return false;
+    return lastWinner === e || (squad > 1 && lastWinner.team === e.team);
+  }
   function finish(won, msg, place) {
-    // Two people on opposite sides: each only won if they were the one left.
-    var p2 = locals.length > 1 ? locals[1] : null;
-    var rivals = !!p2 && p2.team !== player.team;
-    var guestWon = rivals ? (won && lastWinner === p2) : won;
-    if (rivals) won = won && lastWinner === player;
-    if (p2 && p2.ctl && p2.ctl.net) netSendOver(guestWon, msg, place, p2);
+    // With several people playing, each wins or loses for their own side.
+    var hostSide = won;
+    if (locals.length > 1) won = wonFor(player, hostSide);
+    for (var gz = 0; gz < netGuests.length; gz++) {
+      var gg = netGuests[gz];
+      if (gg.ent) netSendOver(gg, wonFor(gg.ent, hostSide), msg, gg.ent.alive ? 1 : (gg.ent.place || place));
+    }
     var big, small;
     if (mode === 'br') { big = '#' + place; small = 'OF ' + fieldN; }
     else if (mode === 'duel') { big = won ? 'WIN' : 'LOSS'; small = score[0] + ' \u2014 ' + score[1]; }
@@ -2318,6 +2332,12 @@
       $('stAcc').textContent = (sh ? Math.round(ht / sh * 100) : 0) + '%';
       elHud.hidden = true;
       elOver.hidden = false;
+      if (netRole === 'host' && netPublic) {
+        $('overMsg').textContent = why + '  Next match in 10s.';
+        setTimeout(function () {
+          if (tok === matchToken && state === 'over' && netRole === 'host' && netPublic) startMatch();
+        }, 10000);
+      }
     }, 850);
   }
 
@@ -2827,7 +2847,7 @@
   function inputFor(e) {
     var c = e.ctl || { any: true, kb: true };
     if (c.net) {
-      var n = netIn;
+      var n = c.net.in;
       return {
         any: false, net: true, pad: true, kb: false, touch: false, padOn: true,
         hit: function (i) { var b = 1 << i; if (n.hits & b) { n.hits &= ~b; return true; } return false; },
@@ -2998,7 +3018,7 @@
           if (ents[b.owner] && e.team === ents[b.owner].team) continue;
           var dx = e.x - b.x, dy = e.y - b.y;
           if (dx * dx + dy * dy < (e.r + 3) * (e.r + 3)) {
-            if (ents[b.owner] && ents[b.owner].local) hits++;
+            if (onHere(ents[b.owner])) hits++;
             damage(e, b.dmg, b.owner, Math.atan2(b.vy, b.vx));
             dead = true; break;
           }
@@ -3647,7 +3667,7 @@
     },
     padInfo: function () { return { active: padActive(), padLast: padLast, kbmLast: kbmLast, rest: padRest, now: performance.now() }; },
     net: function () {
-      return { role: netRole, guest: netGuest, open: !!(netConn && netConn.open), sent: netStat.sent, recv: netStat.recv,
+      return { role: netRole, guest: netGuest, open: !!(netConn && netConn.open), guests: netGuests.map(function (g) { return g.name + (g.ent ? '@' + g.ent.id : ''); }), sent: netStat.sent, recv: netStat.recv,
                err: netStat.err, queue: netQueue.length, hasPlayer: !!player, ents: ents.length, state: state };
     },
     locals: function () {
@@ -5016,7 +5036,7 @@
   }
   function leaveMatch() {
     if (netGuest) { netClose('You left the match.'); return; }
-    if (netRole === 'host' && netConn && netConn.open) netSend({ t: 'end', why: 'The host left the match.' });
+    if (netRole === 'host') hostEndMatch('The host left the match.');
     goHome();
   }
   $('resumeBtn').addEventListener('click', resume);
@@ -5038,7 +5058,7 @@
         : '  \u2014  CQB: a dense warren of rooms and corridors.';
     }
     if (squad > 1 && mode !== 'team') t += '  \u2014  DUOS: you drop with a partner, you cannot hurt each other, and neither of you reacts to the other\'s noise.';
-    if (netRole === 'host' && netConn && netConn.open) t += '  \u2014  ONLINE: your friend is connected and drops in with you as P2.' + (squad < 2 && !MODE_TEAMMATES[mode] ? ' Solo: rivals. DUOS: partners.' : '');
+    if (netRole === 'host' && netGuests.length) t += '  \u2014  PARTY: ' + netGuests.length + (netGuests.length > 1 ? ' friends' : ' friend') + ' will drop in with you.' + (squad < 2 && !MODE_TEAMMATES[mode] ? ' Solo: rivals. DUOS: partners.' : '');
     if (netRole === 'guest') t = 'ONLINE: connected. The host picks the mode and starts the match.';
     if (splitWant && !netRole) {
       var np = padIndices().length;
@@ -5203,31 +5223,54 @@
     startMatch();
   });
   $('againBtn').addEventListener('click', function () { elOver.hidden = true; startMatch(); });
-  $('homeBtn').addEventListener('click', goHome);
+  $('homeBtn').addEventListener('click', function () {
+    if (netRole === 'host' && netPublic) hostEndMatch('The host left.');
+    goHome();
+  });
 
   // ---------------------------------------------------------------- online
   var PEER_JS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
   var netEv = [], netDefs = [], netSendT = 0, netSigs = {}, guestHits = 0, netInT = 0;
-  var netQueue = [], guestYou = -1, netLastIn = '';
+  var netQueue = [], guestYou = -1, netLastIn = '', quickFail = null;
   var netStat = { sent: 0, recv: 0, err: '' };
   var WKEYS = Object.keys(WEAPONS);
 
   function netStatus(txt) { var el = $('netStatus'); if (el) el.textContent = txt; }
-  function netHostLive() {
-    return !!(netConn && netConn.open && (state === 'play' || state === 'paused' || state === 'ending')
-              && locals.length > 1 && locals[1].ctl && locals[1].ctl.net);
+  // The host stops playing: friends go back to the party, strangers are let go.
+  function hostEndMatch(why) {
+    for (var i = netGuests.length - 1; i >= 0; i--) {
+      var g = netGuests[i];
+      if (g.party) netSendTo(g, { t: 'end', why: why });
+      else { netSendTo(g, { t: 'end', why: why, bye: true }); try { g.conn.close(); } catch (err) {} netGuests.splice(i, 1); }
+      g.ent = null;
+    }
+    netPublic = false;
+    lobbyDrop();
+    partyBroadcast(); partyRender();
   }
+  function netHostLive() {
+    if (netRole !== 'host' || !(state === 'play' || state === 'paused' || state === 'ending')) return false;
+    for (var i = 0; i < netGuests.length; i++) if (netGuests[i].ent) return true;
+    return false;
+  }
+  function netStr(obj) {
+    return JSON.stringify(obj, function (k, v) {
+      return (typeof v === 'number' && v % 1) ? Math.round(v * 100) / 100 : v;
+    });
+  }
+  // guest -> host (the guest has a single connection)
   function netSend(obj) {
     if (!netConn || !netConn.open) return;
-    try {
-      netConn.send(JSON.stringify(obj, function (k, v) {
-        return (typeof v === 'number' && v % 1) ? Math.round(v * 100) / 100 : v;
-      }));
-      netStat.sent++;
-    } catch (err) { netStat.err = String(err && err.message || err); }
+    try { netConn.send(netStr(obj)); netStat.sent++; } catch (err) { netStat.err = String(err && err.message || err); }
   }
+  function netSendTo(g, objOrStr) {
+    if (!g.conn || !g.conn.open) return;
+    try { g.conn.send(typeof objOrStr === 'string' ? objOrStr : netStr(objOrStr)); netStat.sent++; }
+    catch (err) { netStat.err = String(err && err.message || err); }
+  }
+  function netSendAll(obj) { var str = netStr(obj); for (var i = 0; i < netGuests.length; i++) netSendTo(netGuests[i], str); }
   function netDefId(def) {
-    if (def.__nid === undefined) { def.__nid = netDefs.length; netDefs.push(def); def.__new = true; }
+    if (def.__nid === undefined) { def.__nid = netDefs.length; netDefs.push(def); }
     return def.__nid;
   }
 
@@ -5246,69 +5289,123 @@
   }
   function netClose(why) {
     var wasGuest = netRole === 'guest';
+    if (netRole === 'host') netSendAll({ t: 'end', why: 'The host closed the party.', bye: true });
+    for (var i = 0; i < netGuests.length; i++) { try { netGuests[i].conn.close(); } catch (err) {} }
+    netGuests = [];
+    lobbyDrop();
     try { if (netConn) netConn.close(); } catch (err) {}
     try { if (netPeer) netPeer.destroy(); } catch (err) {}
-    netConn = null; netPeer = null; netRole = null;
+    netConn = null; netPeer = null; netRole = null; netPublic = false; netCode = '';
     $('netCodeBox').hidden = true;
     if (wasGuest && (netGuest || state !== 'menu')) { goHome(); openOnline(); }
     netStatus(why || 'Disconnected.');
+    partyRender();
     syncMenu();
   }
 
-  function hostGame() {
+  // Open a room. `then` runs once the room code is live.
+  function hostGame(then) {
+    if (netRole === 'host' && netPeer && netCode) { if (typeof then === 'function') then(); return; }
     netClose('');
     netStatus('Starting...');
     loadPeer(function () {
       var code = roomCode();
       netPeer = new window.Peer('deadangle-' + code);
       netPeer.on('open', function () {
-        netRole = 'host';
+        netRole = 'host'; netCode = code;
         $('netCode').textContent = code;
         $('netCodeBox').hidden = false;
-        netStatus('Waiting for a friend. Give them this code; they press JOIN and type it in.');
+        netStatus('Party open. Friends join with this code, or invite them from your friends list.');
+        partyRender();
         syncMenu();
+        if (typeof then === 'function') then();
       });
       netPeer.on('connection', function (conn) {
-        if (netConn && netConn.open) { conn.on('open', function () { conn.close(); }); return; }
-        netConn = conn;
-        conn.on('open', function () {
-          netStatus('Friend connected! Go BACK, pick a mode and start - they drop in as P2.');
-          syncMenu();
-        });
-        conn.on('data', hostReceive);
-        conn.on('close', hostLostGuest);
-        conn.on('error', hostLostGuest);
+        var g = { conn: conn, name: 'PLAYER', skin: 0, uid: '', party: true, ent: null, sigs: {},
+                  in: { ax: [0, 0], aim: null, down: 0, hits: 0 } };
+        conn.on('data', function (raw) { hostReceive(g, raw); });
+        conn.on('close', function () { hostLostGuest(g); });
+        conn.on('error', function () { hostLostGuest(g); });
       });
       netPeer.on('error', function (err) {
-        if (err && err.type === 'unavailable-id') { hostGame(); return; }
+        if (err && err.type === 'unavailable-id') { netRole = null; hostGame(then); return; }
         netStatus('Connection problem: ' + (err && err.type ? err.type : 'unknown') + '.');
       });
     });
   }
-  function hostLostGuest() {
-    netConn = null;
-    // whoever was P2 is handed to a bot so the match can carry on
-    for (var i = 0; i < locals.length; i++) {
-      var L = locals[i];
-      if (L.ctl && L.ctl.net) {
-        L.local = false; L.bot = true; L.ctl = null; L.skip = L.skip || {};
-        L.path = null; L.target = null;
-        locals.splice(i, 1);
-        if (state === 'play' || state === 'paused') feed('<b>P2</b> disconnected - a bot takes over', true);
-        break;
-      }
+  function hostLostGuest(g) {
+    var i = netGuests.indexOf(g);
+    if (i < 0) return;
+    netGuests.splice(i, 1);
+    var L = g.ent;
+    if (L) {
+      // a bot takes the body back so the match can carry on
+      L.local = false; L.bot = true; L.ctl = null; L.skip = L.skip || {};
+      L.path = null; L.target = null;
+      var li = locals.indexOf(L);
+      if (li >= 0) locals.splice(li, 1);
+      if (state === 'play' || state === 'paused') feed('<b>' + g.name + '</b> left - a bot takes over', false);
+      g.ent = null;
     }
-    if (netRole === 'host') netStatus('Your friend left. Still hosting with the same code.');
+    partyBroadcast();
+    partyRender();
+    lobbyTouch();
     syncMenu();
   }
-  function hostReceive(raw) {
+  function humansIn() { return 1 + netGuests.length; }
+  function hostReceive(g, raw) {
+    g.last = performance.now();
     var m; try { m = JSON.parse(raw); } catch (err) { return; }
     if (m.t === 'in') {
-      netIn.ax = m.ax || [0, 0]; netIn.aim = m.aim; netIn.down = m.down | 0;
-      netIn.hits |= m.hits | 0;
+      g.in.ax = m.ax || [0, 0]; g.in.aim = m.aim; g.in.down = m.down | 0;
+      g.in.hits |= m.hits | 0;
     } else if (m.t === 'hi') {
-      netGuestSkin = clamp(m.skin | 0, 0, 15);
+      g.name = String(m.name || 'PLAYER').replace(/[^A-Za-z0-9_]/g, '').slice(0, 16) || 'PLAYER';
+      g.skin = clamp(m.skin | 0, 0, 15); g.uid = String(m.uid || ''); g.party = !m.pub;
+      if (humansIn() >= NET_MAX || (m.pub && !netPublic)) {
+        netSendTo(g, { t: 'full' });
+        setTimeout(function () { try { g.conn.close(); } catch (err) {} }, 300);
+        return;
+      }
+      netGuests.push(g);
+      feed('<b>' + g.name + '</b> joined', true);
+      if (state === 'play' || state === 'paused') {
+        if (admitGuest(g, false)) netSendTo(g, startMsg(g));
+        else netSendTo(g, { t: 'wait', why: 'Match in progress - you will be in the next one.' });
+      }
+      partyBroadcast();
+      partyRender();
+      lobbyTouch();
+      syncMenu();
     }
+  }
+
+  // Put a guest into the match by taking over a bot. Friends go to the host's
+  // side where they can; in battle royale only a body still on the plane will do.
+  function admitGuest(g, atStart) {
+    if (g.ent) return true;
+    var hum = {}, i;
+    for (i = 0; i < locals.length; i++) hum[locals[i].team] = (hum[locals[i].team] || 0) + 1;
+    var best = null, bestScore = -1e9;
+    for (i = 0; i < ents.length; i++) {
+      var e = ents[i];
+      if (!e.bot || isZombie(e)) continue;
+      if (mode === 'br' && !atStart && e.air !== 'plane') continue;
+      if (mode === 'br' && !e.alive) continue;
+      var sc2 = -(hum[e.team] || 0) * 10 + (e.alive ? 2 : 0) + Math.random();
+      if (g.party && e.team === player.team) sc2 += 50;
+      if (sc2 > bestScore) { bestScore = sc2; best = e; }
+    }
+    if (!best) return false;
+    best.bot = false; best.local = true; best.ctl = { net: g };
+    best.cam = { x: best.x, y: best.y };
+    best.name = g.name; best.target = null; best.path = null;
+    if (!MODE.teams && !MODE.zombies) { best.skin = g.skin; charCache = {}; }
+    locals.push(best);
+    g.ent = best; g.sigs = {};
+    g.in = { ax: [0, 0], aim: null, down: 0, hits: 0 };
+    if (!atStart) feed('<b>' + g.name + '</b> dropped in', true);
+    return true;
   }
 
   function packRegion(src) {
@@ -5324,20 +5421,17 @@
     var str = atob(b64), k = 0;
     for (var y = 0; y < MAP_H; y++) for (var x = 0; x < MAP_W; x++) dst[y * STRIDE + x] = str.charCodeAt(k++);
   }
-  function netSendStart(p2) {
-    netSigs = {}; netEv = [];
-    for (var i = 0; i < netDefs.length; i++) netDefs[i].__new = true;   // a fresh guest needs them all
-    netSend({
-      t: 'start', mode: mode, mapKind: mapKind, blackout: blackout, squad: squad, difficulty: difficulty,
-      w: MAP_W, h: MAP_H, grid: packRegion(grid), mat: packRegion(mat), you: p2.id
-    });
+  var mapPack = null;
+  function startMsg(g) {
+    if (!mapPack || mapPack.token !== matchToken) mapPack = { token: matchToken, grid: packRegion(grid), mat: packRegion(mat) };
+    g.sigs = {}; g.defsSent = 0;
+    return { t: 'start', mode: mode, mapKind: mapKind, blackout: blackout, squad: squad, difficulty: difficulty,
+             w: MAP_W, h: MAP_H, grid: mapPack.grid, mat: mapPack.mat, you: g.ent.id };
   }
-  function netSendOver(won, msg, place, p2) {
-    var big;
-    if (mode === 'br') big = '#' + (won ? 1 : place);
-    else big = won ? 'WIN' : 'LOSS';
-    netSend({ t: 'over', won: won, big: big, small: mode === 'br' ? 'OF ' + fieldN : '', msg: msg,
-              kills: p2.kills || 0, time: matchTime });
+  function netSendOver(g, won, msg, place) {
+    var big = mode === 'br' ? '#' + place : (won ? 'WIN' : 'LOSS');
+    netSendTo(g, { t: 'over', won: won, big: big, small: mode === 'br' ? 'OF ' + fieldN : '', msg: msg,
+                   kills: g.ent.kills || 0, time: matchTime });
   }
 
   function packEnt(e) {
@@ -5362,12 +5456,20 @@
   }
 
   function netHostTick(dt) {
+    lobbyTick(dt);
+    // a guest who has gone quiet for a long while has gone; the browser can
+    // take ages to report a closed tab on its own
+    var nowT = performance.now();
+    for (var qi = netGuests.length - 1; qi >= 0; qi--) {
+      var qg = netGuests[qi];
+      if (qg.last && nowT - qg.last > 20000) { try { qg.conn.close(); } catch (err) {} hostLostGuest(qg); }
+    }
     if (!netHostLive()) { netEv.length = 0; return; }
     netSendT -= dt;
     if (netSendT > 0) return;
     netSendT = 1 / 20;
-    var p2 = locals[1];
-    var snap = {
+    // everything everyone sees, serialised once
+    var shared = netStr({
       t: 's', hold: state === 'paused',
       e: ents.map(packEnt),
       b: bullets.map(function (b) { return [b.x, b.y, b.vx, b.vy, b.owner]; }),
@@ -5381,63 +5483,116 @@
         return { x: q.x, y: q.y, r: q.r, maxR: q.maxR, speed: q.speed, color: q.color, w: q.w, kind: q.kind, owner: q.owner };
       }) : null,
       h: [alive, score[0], score[1], round, roundClock, roundBreak, zombClock, matchTime, fieldN],
-      dm: dmgMarks.filter(function (m) { return m.who === p2.id; }),
       ev: netEv
-    };
-    var ls = lootSig(); if (netSigs.lo !== ls) { netSigs.lo = ls; snap.lo = loot; }
-    var ds = sigOf(decals); if (netSigs.dc !== ds) { netSigs.dc = ds; snap.dc = decals; }
-    var es = sigOf(deaths); if (netSigs.de !== es) { netSigs.de = es; snap.de = deaths; }
-    var cs = sigOf(corpses); if (netSigs.co !== cs) { netSigs.co = cs; snap.co = corpses.slice(-80); }
-    var nd = null;
-    for (var i = 0; i < netDefs.length; i++) if (netDefs[i].__new) {
-      nd = nd || {};
-      var d = netDefs[i];
-      nd[i] = { maxR: d.maxR, speed: d.speed, color: d.color, w: d.w, aud: d.aud, sample: d.sample, sampleGain: d.sampleGain, rate: d.rate };
-      d.__new = false;
+    });
+    var ls = lootSig(), ds = sigOf(decals), es = sigOf(deaths), cs = sigOf(corpses);
+    for (var gi = 0; gi < netGuests.length; gi++) {
+      var g = netGuests[gi];
+      if (!g.ent) continue;
+      // what this one person still needs: their own hit marks, and any lists
+      // that changed since we last sent them
+      var x = { dm: dmgMarks.filter(function (m) { return m.who === g.ent.id; }) };
+      if (g.sigs.lo !== ls) { g.sigs.lo = ls; x.lo = loot; }
+      if (g.sigs.dc !== ds) { g.sigs.dc = ds; x.dc = decals; }
+      if (g.sigs.de !== es) { g.sigs.de = es; x.de = deaths; }
+      if (g.sigs.co !== cs) { g.sigs.co = cs; x.co = corpses.slice(-80); }
+      if ((g.defsSent || 0) < netDefs.length) {
+        x.defs = {};
+        for (var k = g.defsSent || 0; k < netDefs.length; k++) {
+          var d = netDefs[k];
+          x.defs[k] = { maxR: d.maxR, speed: d.speed, color: d.color, w: d.w, aud: d.aud, sample: d.sample, sampleGain: d.sampleGain, rate: d.rate };
+        }
+        g.defsSent = netDefs.length;
+      }
+      netSendTo(g, shared.slice(0, -1) + ',"x":' + netStr(x) + '}');
     }
-    if (nd) snap.defs = nd;
-    netSend(snap);
     netEv = [];
   }
 
+  // who is in the party, for everyone's screen
+  function partyNames() {
+    var n = [acctName || 'HOST'];
+    for (var i = 0; i < netGuests.length; i++) if (netGuests[i].party) n.push(netGuests[i].name);
+    return n;
+  }
+  function partyBroadcast() { if (netRole === 'host') netSendAll({ t: 'party', names: partyNames(), code: netCode }); }
+  var partyList = [];
+  function partyRender() {
+    var el = $('partyList');
+    if (!el) return;
+    var names = netRole === 'host' ? partyNames() : (netRole === 'guest' ? partyList : []);
+    el.innerHTML = '';
+    names.forEach(function (nm, i) {
+      var d = document.createElement('div');
+      d.className = 'prow';
+      d.textContent = (i === 0 ? '\u2605 ' : '') + nm;
+      el.appendChild(d);
+    });
+    el.hidden = !names.length;
+  }
+
+  // Public-match hooks; the accounts module fills these in when it loads.
+  var lobbyTouch = function () {}, lobbyDrop = function () {}, lobbyTick = function () {};
+
   // ---- the guest's side ----
-  function joinGame(code) {
+  // pub: joining a stranger's public match. onFail: called instead of just
+  // reporting, so Quick Play can try the next one.
+  function joinGame(code, pub, onFail) {
     code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (code.length !== 5) { netStatus('Room codes are 5 letters and numbers.'); return; }
     netClose('');
     netStatus('Connecting...');
+    var failed = false;
+    function fail(msg) {
+      if (failed) return;
+      failed = true;
+      netClose(msg);
+      if (onFail) onFail(msg);
+    }
     loadPeer(function () {
       netPeer = new window.Peer();
       netPeer.on('open', function () {
         var conn = netPeer.connect('deadangle-' + code, { reliable: true, serialization: 'raw' });
         netConn = conn;
         var opened = false;
-        setTimeout(function () { if (!opened && netConn === conn) netClose('No answer from that code. Check it with your friend.'); }, 12000);
+        setTimeout(function () { if (!opened && netConn === conn) fail('No answer from that code. Check it with your friend.'); }, 12000);
         conn.on('open', function () {
           opened = true;
-          netRole = 'guest';
-          netSend({ t: 'hi', skin: WALLET.skin });
-          netStatus('Connected! Waiting for the host to start a match.');
+          netRole = 'guest'; netCode = code;
+          netSend({ t: 'hi', skin: WALLET.skin, name: acctName || 'PLAYER', uid: acctUid(), pub: !!pub });
+          netStatus(pub ? 'Joining a match...' : 'Connected! Waiting for the host to start a match.');
           syncMenu();
         });
         conn.on('data', guestReceive);
-        conn.on('close', function () { if (netConn === conn) netClose('The host closed the game.'); });
-        conn.on('error', function () { if (netConn === conn) netClose('Lost the connection.'); });
+        conn.on('close', function () { if (netConn === conn) { if (!opened) fail('Could not connect.'); else netClose('The host closed the game.'); } });
+        conn.on('error', function () { if (netConn === conn) fail('Lost the connection.'); });
       });
       netPeer.on('error', function (err) {
-        netClose(err && err.type === 'peer-unavailable' ? 'No game with that code. Check it with your friend.'
-                                                        : 'Connection problem: ' + (err && err.type ? err.type : 'unknown') + '.');
+        fail(err && err.type === 'peer-unavailable' ? 'No game with that code. Check it with your friend.'
+                                                    : 'Connection problem: ' + (err && err.type ? err.type : 'unknown') + '.');
       });
     });
   }
+  // a guest waiting in a party still says it is there
+  setInterval(function () { if (netRole === 'guest') netSend({ t: 'ping' }); }, 4000);
+  function acctUid() { return (window.firebase && firebase.auth && firebase.apps.length && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : ''; }
 
   function guestReceive(raw) {
     netStat.recv++;
     var m; try { m = JSON.parse(raw); } catch (err) { netStat.err = 'parse: ' + typeof raw; return; }
-    if (m.t === 's') { netQueue.push(m); if (netQueue.length > 30) netQueue.splice(0, netQueue.length - 30); }
+    if (m.t === 's') {
+      if (m.x) { for (var xk in m.x) m[xk] = m.x[xk]; }
+      netQueue.push(m); if (netQueue.length > 30) netQueue.splice(0, netQueue.length - 30);
+    }
+    else if (m.t === 'party') { partyList = m.names || []; partyRender(); }
+    else if (m.t === 'wait') netStatus(m.why);
+    else if (m.t === 'full') { netClose('That match is full.'); if (quickFail) quickFail(); }
     else if (m.t === 'start') guestStart(m);
     else if (m.t === 'over') guestOver(m);
-    else if (m.t === 'end') { if (netGuest) { goHome(); openOnline(); } netStatus(m.why || 'The match ended.'); }
+    else if (m.t === 'end') {
+      if (netGuest) { goHome(); openOnline(); }
+      if (m.bye) netClose(m.why); else netStatus(m.why || 'The match ended.');
+    }
   }
 
   function guestStart(m) {
@@ -5618,10 +5773,12 @@
   function openOnline() {
     elMenu.hidden = true;
     $('online').hidden = false;
+    partyRender();
+    if (typeof renderFriends === 'function') renderFriends();
     if (!netRole) netStatus('One of you hosts, the other joins with the code. Works best on a normal home connection.');
   }
   $('onlineBtn').addEventListener('click', openOnline);
-  $('netHost').addEventListener('click', hostGame);
+  $('netHost').addEventListener('click', function () { hostGame(); });
   $('netJoin').addEventListener('click', function () { joinGame($('netJoinCode').value); });
   $('netJoinCode').addEventListener('keydown', function (ev) {
     ev.stopPropagation();
@@ -5629,6 +5786,356 @@
   });
   $('netBack').addEventListener('click', function () { $('online').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('netLeave').addEventListener('click', function () { netClose('Disconnected.'); });
+
+  // ---------------------------------------------------------------- accounts
+  // Firebase is only an address book here: who you are, who your friends are,
+  // which public matches are open. The matches themselves still run peer to
+  // peer on the host's machine.
+  var FB_VER = '10.14.1';
+  var FB_CFG = {
+    apiKey: 'AIzaSyCTCjH9-4Trrz1BIZa3wZcue6x_89GMUSk',
+    authDomain: 'dead-angle-f314f.firebaseapp.com',
+    projectId: 'dead-angle-f314f',
+    storageBucket: 'dead-angle-f314f.firebasestorage.app',
+    messagingSenderId: '382280525012',
+    appId: '1:382280525012:web:968327ff5739d7135cc741'
+  };
+  // usernames become a made-up address - nobody needs a real email to play
+  var EMAIL_DOM = '@players.dead-angle.game';
+  var fbReady = false, fbLoading = null, fbAuth = null, fbDb = null, fbUser = null;
+  var fbFriends = [], fbInvUnsub = null, fbBeatT = null, fbWalletT = null, fbProfileTries = 0;
+
+  function acctStatus(t) { var el = $('acctStatus'); if (el) el.textContent = t; }
+  function quickStatus(t) { netStatus(t); var el = $('quickStatus'); if (el) { el.textContent = t; el.hidden = !t; } }
+
+  function loadFirebase(cb) {
+    if (fbReady) { cb(); return; }
+    if (fbLoading) { fbLoading.push(cb); return; }
+    fbLoading = [cb];
+    var files = ['firebase-app-compat.js', 'firebase-auth-compat.js', 'firebase-firestore-compat.js'], k = 0;
+    (function next() {
+      if (k >= files.length) {
+        try {
+          if (!firebase.apps.length) firebase.initializeApp(FB_CFG);
+          fbAuth = firebase.auth(); fbDb = firebase.firestore();
+          fbAuth.onAuthStateChanged(onAuth);
+          fbReady = true;
+        } catch (err) { acctStatus('The account service did not start.'); fbLoading = null; return; }
+        var q = fbLoading; fbLoading = null;
+        q.forEach(function (f) { f(); });
+        return;
+      }
+      var sc = document.createElement('script');
+      sc.src = 'https://cdn.jsdelivr.net/npm/firebase@' + FB_VER + '/' + files[k++];
+      sc.onload = next;
+      sc.onerror = function () { acctStatus('Could not reach the account service.'); fbLoading = null; };
+      document.head.appendChild(sc);
+    })();
+  }
+
+  function errText(err) {
+    var c = (err && err.code) || '';
+    if (c === 'taken' || c === 'auth/email-already-in-use') return 'That username is taken.';
+    if (c === 'auth/invalid-credential' || c === 'auth/wrong-password' || c === 'auth/user-not-found' || c === 'auth/invalid-login-credentials')
+      return 'Wrong username or password.';
+    if (c === 'auth/too-many-requests') return 'Too many tries - wait a minute.';
+    if (c === 'auth/network-request-failed' || c === 'unavailable') return 'No connection to the account service.';
+    if (c === 'auth/operation-not-allowed') return 'Username sign-in is not switched on in Firebase yet (Email/Password).';
+    if (c === 'permission-denied') return 'The game database is not set up yet (Firestore rules).';
+    if (c === 'auth/weak-password') return 'Pick a longer password (6+ characters).';
+    return (err && err.message) || 'Something went wrong.';
+  }
+  function readCreds() {
+    var nm = $('acctUser').value.trim(), pw = $('acctPass').value;
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(nm)) { acctStatus('Usernames are 3-16 letters, numbers or _.'); return null; }
+    if (pw.length < 6) { acctStatus('Passwords need at least 6 characters.'); return null; }
+    return { name: nm, lower: nm.toLowerCase(), pass: pw };
+  }
+
+  function signUp() {
+    var c = readCreds(); if (!c) return;
+    acctStatus('Creating your account...');
+    loadFirebase(function () {
+      fbDb.collection('usernames').doc(c.lower).get().then(function (d) {
+        if (d.exists) throw { code: 'taken' };
+        return fbAuth.createUserWithEmailAndPassword(c.lower + EMAIL_DOM, c.pass);
+      }).then(function (cred) {
+        var uid = cred.user.uid;
+        return fbDb.collection('usernames').doc(c.lower).set({ uid: uid, name: c.name }).then(function () {
+          return fbDb.collection('users').doc(uid).set({
+            name: c.name, nameLower: c.lower, friends: [],
+            coins: WALLET.coins, owned: WALLET.owned, skin: WALLET.skin,
+            lastSeen: Date.now(), party: '', partyHost: false
+          });
+        }).catch(function (err) {
+          // the name got taken in the same moment: undo the half-made account
+          return cred.user.delete().then(function () { throw err; }, function () { throw err; });
+        });
+      }).then(function () {
+        acctStatus('Welcome, ' + c.name + '!');
+        fbProfileTries = 0; onAuth(fbAuth.currentUser);
+        setTimeout(closeAccount, 700);
+      }).catch(function (err) { acctStatus(errText(err)); });
+    });
+  }
+  function logIn() {
+    var c = readCreds(); if (!c) return;
+    acctStatus('Logging in...');
+    loadFirebase(function () {
+      fbAuth.signInWithEmailAndPassword(c.lower + EMAIL_DOM, c.pass)
+        .then(function () { acctStatus(''); closeAccount(); })
+        .catch(function (err) { acctStatus(errText(err)); });
+    });
+  }
+  function logOut() {
+    if (netRole) netClose('Logged out.');
+    if (fbAuth) fbAuth.signOut();
+  }
+
+  function onAuth(user) {
+    fbUser = user || null;
+    if (fbInvUnsub) { fbInvUnsub(); fbInvUnsub = null; }
+    if (fbBeatT) { clearInterval(fbBeatT); fbBeatT = null; }
+    if (!user) { acctName = ''; fbFriends = []; renderAcct(); renderFriends(); return; }
+    fbDb.collection('users').doc(user.uid).get().then(function (d) {
+      if (!d.exists) {
+        // a brand-new account can arrive here a moment before its profile
+        if (fbProfileTries++ < 4) setTimeout(function () { if (fbUser === user) onAuth(user); }, 1200);
+        return;
+      }
+      var p = d.data();
+      acctName = p.name || '';
+      fbFriends = p.friends || [];
+      // the account's coins and skins win; skins owned on this machine are kept
+      if (typeof p.coins === 'number') {
+        var owned = (p.owned || []).slice();
+        WALLET.owned.forEach(function (k) { if (owned.indexOf(k) < 0) owned.push(k); });
+        WALLET = { coins: p.coins, owned: owned.length ? owned : WALLET.owned, skin: (p.skin | 0) };
+        if (WALLET.owned.indexOf(WALLET.skin) < 0) WALLET.skin = WALLET.owned[0];
+        try { localStorage.setItem('earshot.wallet', JSON.stringify(WALLET)); } catch (err) {}
+        refreshCoins();
+      }
+      renderAcct();
+      heartbeat();
+      fbBeatT = setInterval(heartbeat, 30000);
+      listenInvites();
+      renderFriends();
+    }).catch(function (err) { acctStatus(errText(err)); renderAcct(); });
+  }
+
+  var cloudWallet = function () {
+    if (!fbUser || !fbDb) return;
+    clearTimeout(fbWalletT);
+    fbWalletT = setTimeout(function () {
+      if (!fbUser) return;
+      fbDb.collection('users').doc(fbUser.uid).update({ coins: WALLET.coins, owned: WALLET.owned, skin: WALLET.skin }).catch(function () {});
+    }, 1500);
+  };
+  function heartbeat() {
+    if (!fbUser) return;
+    fbDb.collection('users').doc(fbUser.uid).update({
+      lastSeen: Date.now(), party: netRole ? netCode : '', partyHost: netRole === 'host'
+    }).catch(function () {});
+  }
+
+  function renderAcct() {
+    var on = !!(fbUser && acctName);
+    $('acctName').textContent = on ? acctName : 'NOT LOGGED IN';
+    $('acctBtn').textContent = on ? 'LOG OUT' : 'LOG IN';
+    $('friendsBox').hidden = !on;
+    $('friendsNeed').hidden = on;
+  }
+  function openAccount(msg) {
+    ['menu', 'online'].forEach(function (id) { $(id).hidden = true; });
+    $('account').hidden = false;
+    acctStatus(msg || '');
+    loadFirebase(function () {});
+  }
+  function closeAccount() { $('account').hidden = true; elMenu.hidden = false; syncMenu(); }
+
+  // ---- friends ----
+  function addFriend() {
+    var nm = $('friendName').value.trim().toLowerCase();
+    if (!fbUser) { openAccount('Log in to add friends.'); return; }
+    if (!/^[a-z0-9_]{3,16}$/.test(nm)) { netStatus('Type their username.'); return; }
+    fbDb.collection('usernames').doc(nm).get().then(function (d) {
+      if (!d.exists) { netStatus('Nobody is called ' + nm + '.'); return; }
+      var uid = d.data().uid;
+      if (uid === fbUser.uid) { netStatus('That is you!'); return; }
+      if (fbFriends.indexOf(uid) >= 0) { netStatus('Already on your list.'); return; }
+      return fbDb.collection('users').doc(fbUser.uid).update({ friends: firebase.firestore.FieldValue.arrayUnion(uid) }).then(function () {
+        fbFriends.push(uid);
+        $('friendName').value = '';
+        netStatus('Added ' + d.data().name + '.');
+        renderFriends();
+      });
+    }).catch(function (err) { netStatus(errText(err)); });
+  }
+  function removeFriend(uid) {
+    fbDb.collection('users').doc(fbUser.uid).update({ friends: firebase.firestore.FieldValue.arrayRemove(uid) }).then(function () {
+      fbFriends = fbFriends.filter(function (u) { return u !== uid; });
+      renderFriends();
+    }).catch(function (err) { netStatus(errText(err)); });
+  }
+  var friendsT = null;
+  function renderFriends() {
+    var el = $('friendList');
+    if (!el) return;
+    if (!fbUser || !fbFriends.length) {
+      el.innerHTML = fbUser ? '<div class="fempty">No friends yet - add one by username.</div>' : '';
+      return;
+    }
+    Promise.all(fbFriends.map(function (uid) {
+      return fbDb.collection('users').doc(uid).get().then(function (d) { var v = d.exists ? d.data() : null; if (v) v.uid = uid; return v; }, function () { return null; });
+    })).then(function (list) {
+      el.innerHTML = '';
+      var now = Date.now();
+      list.filter(Boolean).sort(function (a, b) { return (b.lastSeen || 0) - (a.lastSeen || 0); }).forEach(function (f) {
+        var online = now - (f.lastSeen || 0) < 75000;
+        var row = document.createElement('div');
+        row.className = 'frow' + (online ? ' on' : '');
+        var nm = document.createElement('span');
+        nm.className = 'fname';
+        nm.textContent = f.name;
+        var st = document.createElement('em');
+        st.textContent = online ? (f.party ? (f.partyHost ? 'HOSTING A PARTY' : 'IN A PARTY') : 'ONLINE') : 'OFFLINE';
+        row.appendChild(nm); row.appendChild(st);
+        if (online && f.partyHost && f.party && f.party !== netCode) {
+          var jb = document.createElement('button');
+          jb.className = 'tgl on'; jb.type = 'button'; jb.textContent = 'JOIN';
+          jb.addEventListener('click', function () { joinGame(f.party, false); });
+          row.appendChild(jb);
+        }
+        if (online) {
+          var ib = document.createElement('button');
+          ib.className = 'tgl'; ib.type = 'button'; ib.textContent = 'INVITE';
+          ib.addEventListener('click', function () { invite(f); });
+          row.appendChild(ib);
+        }
+        var rb = document.createElement('button');
+        rb.className = 'tgl'; rb.type = 'button'; rb.textContent = '\u2715'; rb.title = 'Remove friend';
+        rb.addEventListener('click', function () { removeFriend(f.uid); });
+        row.appendChild(rb);
+        el.appendChild(row);
+      });
+    });
+  }
+
+  // ---- invites ----
+  function invite(f) {
+    if (netRole === 'guest') { netStatus('Only the party leader can invite.'); return; }
+    hostGame(function () {
+      fbDb.collection('invites').doc(f.uid).collection('items').add({
+        from: fbUser.uid, fromName: acctName, code: netCode, at: Date.now()
+      }).then(function () { netStatus('Invite sent to ' + f.name + '.'); heartbeat(); })
+        .catch(function (err) { netStatus(errText(err)); });
+    });
+  }
+  var shownInvite = null;
+  function listenInvites() {
+    if (!fbUser) return;
+    fbInvUnsub = fbDb.collection('invites').doc(fbUser.uid).collection('items').onSnapshot(function (qs) {
+      var now = Date.now(), best = null;
+      qs.forEach(function (d) {
+        var v = d.data();
+        if (now - (v.at || 0) > 180000) { d.ref.delete().catch(function () {}); return; }
+        if (!best || v.at > best.v.at) best = { ref: d.ref, v: v };
+      });
+      if (!best) { $('inviteToast').hidden = true; shownInvite = null; return; }
+      shownInvite = best;
+      $('inviteText').textContent = best.v.fromName + ' invited you to their party';
+      $('inviteToast').hidden = state === 'play';
+    }, function () {});
+  }
+  function answerInvite(yes) {
+    var inv = shownInvite;
+    $('inviteToast').hidden = true;
+    shownInvite = null;
+    if (!inv) return;
+    inv.ref.delete().catch(function () {});
+    if (yes) { if (netGuest || state === 'play') leaveMatch(); openOnline(); joinGame(inv.v.code, false); }
+  }
+
+  // ---- quick play ----
+  function quickPlay() {
+    if (!fbUser || !acctName) { openAccount('Log in to play online.'); return; }
+    if (netRole === 'guest') { openOnline(); netStatus('You are in a party - the leader starts the match.'); return; }
+    initAudio();
+    if (netRole === 'host' && netGuests.length) { goPublicHost(); return; }
+    if (netRole) netClose('');
+    openOnline();
+    quickStatus('Finding a ' + MODE_LABEL[mode].toLowerCase() + ' match...');
+    fbDb.collection('lobbies').where('mode', '==', mode).where('open', '==', true).limit(25).get().then(function (qs) {
+      var now = Date.now(), list = [];
+      qs.forEach(function (d) {
+        var L = d.data();
+        if (now - (L.updated || 0) < 30000 && L.humans < L.max && L.map === mapKind && L.host !== fbUser.uid) list.push(L);
+      });
+      list.sort(function (a, b) { return b.humans - a.humans; });
+      tryLobby(list, 0);
+    }).catch(function () { goPublicHost(); });
+  }
+  function tryLobby(list, i) {
+    if (i >= list.length) { goPublicHost(); return; }
+    quickStatus('Joining ' + (list[i].name || 'a match') + '...');
+    quickFail = function () { quickFail = null; tryLobby(list, i + 1); };
+    joinGame(list[i].code, true, function () { var f = quickFail; quickFail = null; if (f) f(); });
+  }
+  // nobody to join: open our own public match, which others will find
+  function goPublicHost() {
+    quickStatus('No open match - starting one. Others can drop in.');
+    hostGame(function () {
+      netPublic = true;
+      lobbyWrite();
+      quickStatus('');
+      startMatch();
+    });
+  }
+  var lobbyT = 0;
+  function lobbyOpen() {
+    if (state !== 'play' && state !== 'paused') return false;
+    if (humansIn() >= Math.min(NET_MAX, fieldN)) return false;
+    if (mode === 'br') return !!plane && plane.t < plane.dur * 0.75;   // only while there are seats on the plane
+    return true;
+  }
+  function lobbyWrite() {
+    if (!fbDb || !fbUser || !netCode || !netPublic) return;
+    fbDb.collection('lobbies').doc(netCode).set({
+      host: fbUser.uid, name: acctName, code: netCode, mode: mode, map: mapKind,
+      humans: humansIn(), max: Math.min(NET_MAX, fieldN), open: lobbyOpen(), updated: Date.now()
+    }).catch(function () {});
+  }
+  lobbyTouch = function () { if (netPublic) { lobbyT = 0.2; } };
+  lobbyTick = function (dt) {
+    if (!netPublic) return;
+    lobbyT -= dt;
+    if (lobbyT <= 0) { lobbyT = 8; lobbyWrite(); }
+  };
+  lobbyDrop = function () {
+    if (fbDb && fbUser && netCode) fbDb.collection('lobbies').doc(netCode).delete().catch(function () {});
+  };
+  window.addEventListener('beforeunload', function () { if (netPublic) lobbyDrop(); });
+
+  // ---- wiring ----
+  $('acctBtn').addEventListener('click', function () { if (fbUser && acctName) logOut(); else openAccount(''); });
+  $('acctLogin').addEventListener('click', logIn);
+  $('acctSignup').addEventListener('click', signUp);
+  $('acctBack').addEventListener('click', closeAccount);
+  $('quickBtn').addEventListener('click', quickPlay);
+  $('friendAdd').addEventListener('click', addFriend);
+  $('friendsNeed').addEventListener('click', function () { openAccount(''); });
+  $('inviteJoin').addEventListener('click', function () { answerInvite(true); });
+  $('inviteNo').addEventListener('click', function () { answerInvite(false); });
+  ['acctUser', 'acctPass', 'friendName'].forEach(function (id) {
+    $(id).addEventListener('keydown', function (ev) {
+      ev.stopPropagation();
+      if (ev.key !== 'Enter') return;
+      if (id === 'friendName') addFriend(); else logIn();
+    });
+  });
+  // the friends list keeps itself fresh while you are looking at it
+  setInterval(function () { if (!$('online').hidden && fbUser) renderFriends(); }, 15000);
+  loadFirebase(function () {});
 
   // ---------------------------------------------------------------- loop
   var last = performance.now();

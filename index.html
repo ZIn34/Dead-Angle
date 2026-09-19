@@ -119,6 +119,21 @@ h1 .gold{color:var(--gold)}
 .netcode b{display:block;margin-top:6px;font-family:var(--font-x);font-weight:400;font-size:42px;letter-spacing:.22em;text-indent:.22em;color:var(--gold);-webkit-text-stroke:2px var(--out);paint-order:stroke fill;text-shadow:3px 3px 0 var(--out)}
 .joinrow{display:flex;gap:10px;align-items:center;justify-content:center}
 .joinrow input{width:150px;padding:11px 12px;font-family:var(--font-x);font-size:18px;letter-spacing:.3em;text-indent:.3em;text-transform:uppercase;text-align:center;background:var(--paper);color:var(--out);border:3px solid var(--out);border-radius:4px}
+.acct{display:flex;align-items:center;gap:10px;font-family:var(--font-m);font-size:11px;letter-spacing:.18em;color:var(--khaki)}
+.acct span{color:var(--paper);font-weight:600}
+.plist,.flist{width:100%;max-width:420px;display:flex;flex-direction:column;gap:2px;background:var(--out);border:3px solid var(--out);box-shadow:4px 4px 0 rgba(0,0,0,.45)}
+.flist:empty{display:none}
+.prow,.frow,.fempty{background:var(--navy);padding:9px 12px;display:flex;align-items:center;gap:8px;font-family:var(--font-m);font-size:11px;letter-spacing:.12em;color:var(--paper);text-align:left}
+.fempty{color:var(--khaki)}
+.frow .fname{flex:1;font-weight:600}
+.frow em{font-style:normal;font-size:9px;letter-spacing:.16em;color:var(--khaki)}
+.frow.on em{color:var(--gold)}
+.frow .tgl{padding:4px 10px}
+.friends{width:100%;display:flex;flex-direction:column;align-items:center;gap:10px}
+.acctform{display:flex;flex-direction:column;gap:10px;align-items:center}
+.joinrow input.wide,.acctform input{width:260px;padding:11px 12px;font-family:var(--font-m);font-size:14px;font-weight:600;letter-spacing:.14em;text-align:center;background:var(--paper);color:var(--out);border:3px solid var(--out);border-radius:4px}
+.ptitle.sm{font-size:clamp(22px,6vw,30px)}
+.toast{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--navy);border:3px solid var(--out);border-radius:4px;box-shadow:4px 4px 0 rgba(0,0,0,.45);font-family:var(--font-m);font-size:12px;letter-spacing:.1em;color:var(--paper);pointer-events:auto;max-width:calc(100% - 32px)}
 .ptitle{margin:0;font-family:var(--font-x);font-weight:400;font-size:clamp(32px,8.5vw,50px);letter-spacing:.14em;text-indent:.14em;line-height:1;color:var(--paper);-webkit-text-stroke:2px var(--out);paint-order:stroke fill;text-shadow:4px 4px 0 var(--out)}
 .pbtns{display:flex;flex-direction:column;align-items:center;gap:16px}
 .setlist{width:100%;max-width:440px;display:flex;flex-direction:column;gap:2px;background:var(--out);border:3px solid var(--out);box-shadow:4px 4px 0 rgba(0,0,0,.45)}
@@ -192,6 +207,7 @@ h1 .gold{color:var(--gold)}
 
   <div class="screen" id="menu">
     <div class="panel">
+      <div class="acct"><span id="acctName">NOT LOGGED IN</span><button class="tgl" id="acctBtn" type="button">LOG IN</button></div>
       <div class="brand">
         <h1>DEAD <span class="gold">ANGLE</span></h1>
         <div class="rule"></div>
@@ -274,7 +290,8 @@ h1 .gold{color:var(--gold)}
       </div>
       <div class="pbtns">
         <button class="go" id="startBtn" type="button">DROP IN</button>
-        <button class="go ghost" id="onlineBtn" type="button">PLAY ONLINE</button>
+        <button class="go" id="quickBtn" type="button">QUICK PLAY ONLINE</button>
+        <button class="go ghost" id="onlineBtn" type="button">FRIENDS &amp; PARTY</button>
         <button class="go ghost" id="shopBtn" type="button">SKINS &middot; <span id="menuCoins">0</span> CR</button>
         <button class="go ghost" id="setBtn" type="button">SETTINGS</button>
       </div>
@@ -284,24 +301,66 @@ h1 .gold{color:var(--gold)}
   <div class="screen" id="online" hidden>
     <div class="panel">
       <div class="brand">
-        <h2 class="ptitle">ONLINE</h2>
+        <h2 class="ptitle">PARTY</h2>
         <div class="rule"></div>
-        <div class="tag">you and a friend, anywhere</div>
+        <div class="tag">friends drop into your matches with you</div>
       </div>
+      <p class="modedesc" id="netStatus">Host a party, or join one with a code.</p>
       <div class="pbtns">
-        <button class="go" id="netHost" type="button">HOST A GAME</button>
-        <div class="netcode" id="netCodeBox" hidden>ROOM CODE<b id="netCode">-----</b></div>
+        <button class="go" id="netHost" type="button">HOST A PARTY</button>
+        <div class="netcode" id="netCodeBox" hidden>PARTY CODE<b id="netCode">-----</b></div>
+        <div class="plist" id="partyList" hidden></div>
         <div class="joinrow">
-          <input id="netJoinCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" aria-label="Room code">
+          <input id="netJoinCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" aria-label="Party code">
           <button class="go ghost" id="netJoin" type="button">JOIN</button>
         </div>
       </div>
-      <p class="modedesc" id="netStatus">One of you hosts, the other joins with the code.</p>
+
+      <div class="brand">
+        <h2 class="ptitle sm">FRIENDS</h2>
+        <div class="rule"></div>
+      </div>
+      <button class="go ghost" id="friendsNeed" type="button">LOG IN FOR FRIENDS</button>
+      <div class="friends" id="friendsBox" hidden>
+        <div class="joinrow">
+          <input class="wide" id="friendName" maxlength="16" placeholder="USERNAME" autocomplete="off" spellcheck="false" aria-label="Friend's username">
+          <button class="go ghost" id="friendAdd" type="button">ADD</button>
+        </div>
+        <div class="flist" id="friendList"></div>
+      </div>
+
       <div class="pbtns">
-        <button class="go ghost" id="netLeave" type="button">DISCONNECT</button>
+        <button class="go ghost" id="netLeave" type="button">LEAVE PARTY</button>
         <button class="go ghost" id="netBack" type="button">BACK</button>
       </div>
     </div>
+  </div>
+
+  <div class="screen" id="account" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h2 class="ptitle">ACCOUNT</h2>
+        <div class="rule"></div>
+        <div class="tag">keeps your name, skins, credits and friends</div>
+      </div>
+      <div class="acctform">
+        <input class="wide" id="acctUser" maxlength="16" placeholder="USERNAME" autocomplete="username" spellcheck="false" aria-label="Username">
+        <input class="wide" id="acctPass" type="password" maxlength="64" placeholder="PASSWORD" autocomplete="current-password" aria-label="Password">
+      </div>
+      <p class="modedesc" id="acctStatus"></p>
+      <div class="pbtns">
+        <button class="go" id="acctLogin" type="button">LOG IN</button>
+        <button class="go ghost" id="acctSignup" type="button">CREATE ACCOUNT</button>
+        <button class="go ghost" id="acctBack" type="button">BACK</button>
+      </div>
+      <p class="modedesc">No email needed. There is no password reset, so pick one you will remember.</p>
+    </div>
+  </div>
+
+  <div class="toast" id="inviteToast" hidden>
+    <span id="inviteText"></span>
+    <button class="tgl on" id="inviteJoin" type="button">JOIN</button>
+    <button class="tgl" id="inviteNo" type="button">NO</button>
   </div>
 
   <div class="screen" id="settings" hidden>
