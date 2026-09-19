@@ -4971,7 +4971,7 @@
     keys[k] = true;
     if (netGuest && state === 'play') {
       var GB = { 'e': 0, ' ': 0, 'v': 1, 'x': 1, 'r': 2, 'f': 3, 'h': 5, 'g': 6, 'q': 14, '1': 14, '2': 14 };
-      if (k === 'escape') { if (netGuestPaused) resume(); else pause(); }
+      if (k === 'escape') { if (settingsOpenFromPause()) $('setBack').click(); else if (netGuestPaused) resume(); else pause(); }
       else if (k === 'm') { muted = !muted; feed(muted ? 'sound <b>off</b>' : 'sound <b>on</b>', true); }
       else if (GB[k] !== undefined && !netGuestPaused && !e.repeat) guestHits |= 1 << GB[k];
       if (['w', 'a', 's', 'd', ' '].indexOf(k) >= 0) e.preventDefault();
@@ -4993,7 +4993,7 @@
       else if (k === 'x' && kp.down) { kp.hp = 0; kill(kp, -1); }
       else if (k === 'm') { muted = !muted; feed(muted ? 'sound <b>off</b>' : 'sound <b>on</b>', true); }
       else if (k === 'escape') pause();
-    } else if (k === 'escape' && state === 'paused') resume();
+    } else if (k === 'escape' && state === 'paused') { if (settingsOpenFromPause()) $('setBack').click(); else resume(); }
     if (['w', 'a', 's', 'd', ' '].indexOf(k) >= 0) e.preventDefault();
   });
   window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
@@ -5187,15 +5187,27 @@
       syncSettings();
     });
   });
+  // Settings open from the menu or from the pause screen, and go back there.
+  var setFrom = 'menu';
   $('setBtn').addEventListener('click', function () {
     syncSettings();
+    setFrom = 'menu';
     elMenu.hidden = true;
+    $('settings').hidden = false;
+  });
+  $('pauseSetBtn').addEventListener('click', function () {
+    syncSettings();
+    setFrom = 'pause';
+    elPaused.hidden = true;
     $('settings').hidden = false;
   });
   $('setBack').addEventListener('click', function () {
     $('settings').hidden = true;
-    elMenu.hidden = false;
+    if (setFrom === 'pause' && (state === 'paused' || netGuestPaused)) elPaused.hidden = false;
+    else if (setFrom === 'pause') { /* the match moved on (ended) - nothing to go back to */ }
+    else elMenu.hidden = false;
   });
+  function settingsOpenFromPause() { return setFrom === 'pause' && !$('settings').hidden; }
   window.addEventListener('gamepadconnected', function () { padSeen = true; syncSettings(); syncMenu(); });
 
   $('shopBtn').addEventListener('click', function () {
