@@ -197,7 +197,33 @@
   var DEATH_SND = { maxR: 620, speed: 820, aud: { rate: 0.45, cut: 780,  hp: 55,  decay: 0.50, body: 58,  vol: 0.55 } };
   var PICK_SND  = { maxR: 200, speed: 900, aud: { rate: 2.40, cut: 6000, hp: 1200, decay: 0.06, body: 0,  vol: 0.30 } };
 
+  // ---- music: one looping track, quieter under a match than on the menu ----
+  var music = null;
+  function startMusic() {
+    if (music) { if (music.paused && musicLevel() > 0) music.play().catch(function () {}); return; }
+    try {
+      music = new Audio('assets/music.mp3');
+      music.loop = true; music.volume = 0; music.preload = 'auto';
+      music.play().catch(function () {});
+    } catch (err) { music = null; }
+  }
+  function musicLevel() {
+    var inMatch = state === 'play' || state === 'paused' || state === 'ending';
+    return clamp((SET.music / 100) * (SET.vol / 100) * (inMatch ? 0.5 : 1), 0, 1);
+  }
+  function musicTick() {
+    if (!music) return;
+    var want = musicLevel();
+    music.volume = clamp(music.volume + (want - music.volume) * 0.06, 0, 1);
+    if (want > 0 && music.paused) music.play().catch(function () {});
+  }
+  // browsers only allow sound after the player has done something
+  ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
+    window.addEventListener(t, function () { startMusic(); }, { passive: true });
+  });
+
   function initAudio() {
+    startMusic();
     if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
     try {
       var AC = window.AudioContext || window.webkitAudioContext;
@@ -1171,7 +1197,7 @@
   }
   function skinPrice(i) { return i === BASE_SKIN ? 0 : (i >= 12 ? 500 : 200); }
 
-  var SET = { vol: 66, dead: 18, shake: true, minimap: true };
+  var SET = { vol: 66, music: 45, dead: 18, shake: true, minimap: true };
   function loadSettings() {
     try {
       var raw = localStorage.getItem('earshot.settings');
@@ -1682,7 +1708,7 @@
     if (mode === 'br') boardPlane();
     elFeed.innerHTML = '';
     elMenu.hidden = true; elOver.hidden = true; elHud.hidden = false; elPaused.hidden = true;
-    $('online').hidden = true; $('account').hidden = true;
+    $('online').hidden = true; $('account').hidden = true; $('friends').hidden = true;
     state = 'play';
     syncHud();
     if (netRole === 'host') for (var gs = 0; gs < netGuests.length; gs++) if (netGuests[gs].ent) netSendTo(netGuests[gs], startMsg(netGuests[gs]));
@@ -3894,6 +3920,8 @@
       for (var i = 0; i < n && netGuest && state === 'play'; i++) guestTick(1 / 60);
       return window.EARSHOT.net();
     },
+    queueTest: function () { goPublicHost(); },
+    uiStep: function (dt) { uiPad(dt || 0.05); if (netRole === 'host') netHostTick(dt || 0.05); return document.activeElement ? (document.activeElement.id || document.activeElement.textContent.trim().slice(0, 24)) : null; },
     tutInfo: function () {
       return { step: tut.i, item: tut.item && loot.indexOf(tut.item) >= 0 ? [Math.round(tut.item.x), Math.round(tut.item.y)] : null };
     },
@@ -5105,24 +5133,75 @@
 
   // Nudge the aim toward whoever is closest to where you are already pointing.
   // ---- driving the screens with a pad ------------------------------------
-  var uiScr = null, uiIdx = 0, uiRepeat = 0;
+  // ---- driving every screen with a pad ---------------------------------
+  // Up/down/left/right move to whatever is actually in that direction on
+  // screen - down goes to the next row, not the next button along.
+  var uiScr = null, uiRepeat = 0;
   function uiScreen() {
-    var ids = ['paused', 'over', 'settings', 'shop', 'menu'];
+    var ids = ['osk', 'account', 'friends', 'online', 'paused', 'over', 'settings', 'shop', 'menu'];
     for (var i = 0; i < ids.length; i++) {
       var el = $(ids[i]);
       if (el && !el.hidden) return el;
     }
     return null;
   }
+  function uiItems(scr) {
+    var list = Array.prototype.slice.call(scr.querySelectorAll('button, input, .skincard'));
+    // an invite pop-up joins whatever screen is showing
+    if (scr.id !== 'osk' && !$('inviteToast').hidden) list = list.concat(Array.prototype.slice.call($('inviteToast').querySelectorAll('button')));
+    return list.filter(function (el) { return el.offsetParent !== null && !el.disabled; });
+  }
+  function uiMove(items, cur, dx, dy) {
+    var r = cur.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    var best = null, bestS = 1e9;
+    for (var i = 0; i < items.length; i++) {
+      var el = items[i];
+      if (el === cur) continue;
+      var q = el.getBoundingClientRect(), qx = q.left + q.width / 2, qy = q.top + q.height / 2;
+      var sc;
+      if (dy) {
+        // must sit clearly in the next row, above or below; the nearest row
+        // always wins, then whatever in it lines up best
+        if (dy > 0 ? q.top < r.bottom - 4 : q.bottom > r.top + 4) continue;
+        var gap = Math.max(0, dy > 0 ? q.top - r.bottom : r.top - q.bottom);
+        sc = Math.round(gap / 6) * 10000 + Math.abs(qx - cx);
+      } else {
+        if (dx > 0 ? qx <= cx + 2 : qx >= cx - 2) continue;
+        if (Math.abs(qy - cy) > Math.max(r.height, q.height)) continue;    // same row only
+        sc = Math.abs(qx - cx) + Math.abs(qy - cy) * 2;
+      }
+      if (sc < bestS) { bestS = sc; best = el; }
+    }
+    return best;
+  }
+  function uiFocus(el) {
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  function uiBack() {
+    if (!$('osk').hidden) { oskKey('BACK'); return; }
+    if (!$('inviteToast').hidden && document.activeElement && $('inviteToast').contains(document.activeElement)) { answerInvite(false); return; }
+    if (!$('account').hidden) $('acctBack').click();
+    else if (!$('friends').hidden) $('friendsBack').click();
+    else if (!$('online').hidden) $('netBack').click();
+    else if (!$('paused').hidden) resume();
+    else if (!$('shop').hidden) $('shopBack').click();
+    else if (!$('settings').hidden) $('setBack').click();
+    else if (!elOver.hidden) $('homeBtn').click();
+  }
   function uiPad(dt) {
     pollPad();
     if (!pad) return;
     var scr = uiScreen();
     if (!scr) { uiScr = null; return; }
-    var items = Array.prototype.slice.call(scr.querySelectorAll('button, input[type=range], .skincard'));
+    var items = uiItems(scr);
     if (!items.length) return;
-    if (scr !== uiScr) { uiScr = scr; uiIdx = 0; items[0].focus(); }
-    if (uiIdx >= items.length) uiIdx = 0;
+    var cur = document.activeElement;
+    if (scr !== uiScr || items.indexOf(cur) < 0) {
+      if (scr !== uiScr) { uiScr = scr; cur = items[0]; uiFocus(cur); }
+      else { cur = items[0]; }
+    }
 
     if (uiRepeat > 0) uiRepeat -= dt;
     var ay = padAxis(1), ax = padAxis(0);
@@ -5131,28 +5210,100 @@
     if (!dy && !dx && uiRepeat <= 0) {                 // stick, with a repeat delay
       if (ay > 0.6) dy = 1; else if (ay < -0.6) dy = -1;
       else if (ax > 0.6) dx = 1; else if (ax < -0.6) dx = -1;
-      if (dy || dx) uiRepeat = 0.22;
+      if (dy || dx) uiRepeat = 0.2;
     }
 
-    var cur = items[uiIdx];
     if (dx && cur && cur.type === 'range') {
       var stepv = parseInt(cur.step || 1, 10) * 3 * dx;
       cur.value = clamp(parseInt(cur.value, 10) + stepv, parseInt(cur.min, 10), parseInt(cur.max, 10));
       cur.dispatchEvent(new Event('input'));
       dx = 0;
     }
-    if (dy || dx) {
-      uiIdx = (uiIdx + dy + dx + items.length) % items.length;
-      items[uiIdx].focus();
+    if (dy || dx) uiFocus(uiMove(items, cur, dx, dy) || cur);
+    if (padHit(0)) {
+      var it = document.activeElement && items.indexOf(document.activeElement) >= 0 ? document.activeElement : cur;
+      if (it && it.tagName === 'INPUT' && it.type !== 'range') openOsk(it);
+      else if (it && it.click) it.click();
     }
-    if (padHit(0)) { var it = items[uiIdx]; if (it && it.click) it.click(); }
-    if (padHit(1)) {
-      if (!$('paused').hidden) resume();
-      else if (!$('shop').hidden) $('shopBack').click();
-      else if (!$('settings').hidden) $('setBack').click();
-      else if (!elOver.hidden) $('homeBtn').click();
+    if (padHit(1)) uiBack();
+    if (padHit(2) && !$('osk').hidden) oskKey('BACK');       // X deletes a letter
+    if (padHit(3) && !$('osk').hidden) oskKey('DONE');       // Y finishes typing
+    if (padHit(9)) {
+      if (!$('osk').hidden) oskKey('DONE');
+      else if (!$('paused').hidden) resume();
     }
-    if (padHit(9) && !$('paused').hidden) resume();
+  }
+
+  // ---- on-screen keyboard, for typing names and codes with a pad --------
+  var oskTarget = null, oskUpper = true;
+  var OSK_ROWS = ['1234567890', 'QWERTYUIOP', 'ASDFGHJKL_', 'ZXCVBNM'];
+  function buildOsk() {
+    var keysEl = $('oskKeys');
+    keysEl.innerHTML = '';
+    OSK_ROWS.forEach(function (row) {
+      var r = document.createElement('div');
+      r.className = 'oskrow';
+      row.split('').forEach(function (ch) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'oskk';
+        b.setAttribute('data-k', ch);
+        b.textContent = ch;
+        b.addEventListener('click', function () { oskKey(this.getAttribute('data-k')); });
+        r.appendChild(b);
+      });
+      keysEl.appendChild(r);
+    });
+    var r2 = document.createElement('div');
+    r2.className = 'oskrow';
+    [['SHIFT', 'abc'], ['BACK', '\u232b DELETE'], ['DONE', 'DONE']].forEach(function (p) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'oskk wide' + (p[0] === 'DONE' ? ' done' : '');
+      b.setAttribute('data-k', p[0]);
+      b.textContent = p[1];
+      b.addEventListener('click', function () { oskKey(this.getAttribute('data-k')); });
+      r2.appendChild(b);
+    });
+    keysEl.appendChild(r2);
+  }
+  function oskShow() {
+    var t = oskTarget;
+    var v = t ? t.value : '';
+    $('oskText').textContent = (t && t.type === 'password' ? v.replace(/./g, '\u2022') : v) || ' ';
+    $('oskLabel').textContent = t ? (t.getAttribute('aria-label') || t.placeholder || '') : '';
+    Array.prototype.forEach.call($('oskKeys').querySelectorAll('.oskk'), function (b) {
+      var k = b.getAttribute('data-k');
+      if (k.length === 1 && /[A-Z]/.test(k)) b.textContent = oskUpper ? k : k.toLowerCase();
+      if (k === 'SHIFT') b.textContent = oskUpper ? 'abc' : 'ABC';
+    });
+  }
+  function openOsk(input) {
+    oskTarget = input;
+    // codes and names read naturally in capitals; passwords start lower case
+    oskUpper = input.type !== 'password';
+    if (!$('oskKeys').children.length) buildOsk();
+    $('osk').hidden = false;
+    oskShow();
+    uiScr = null;
+  }
+  function oskKey(k) {
+    var t = oskTarget;
+    if (!t) { $('osk').hidden = true; return; }
+    if (k === 'DONE') {
+      $('osk').hidden = true;
+      uiScr = uiScreen();            // stay on the box you were typing in
+      uiFocus(t);
+      oskTarget = null;
+      return;
+    }
+    if (k === 'SHIFT') { oskUpper = !oskUpper; oskShow(); return; }
+    if (k === 'BACK') {
+      if (!t.value.length) { oskKey('DONE'); return; }
+      t.value = t.value.slice(0, -1);
+    } else {
+      var max = parseInt(t.getAttribute('maxlength') || '64', 10);
+      if (t.value.length < max) t.value += /[A-Z]/.test(k) && !oskUpper ? k.toLowerCase() : k;
+    }
+    oskShow();
   }
 
   function screenToWorld(sx, sy) {
@@ -5207,7 +5358,6 @@
     if (netGuest && state === 'play') {
       var GB = { 'e': 0, ' ': 0, 'v': 1, 'x': 1, 'r': 2, 'f': 3, 'h': 5, 'g': 6, 'q': 14, '1': 14, '2': 14 };
       if (k === 'escape') { if (settingsOpenFromPause()) $('setBack').click(); else if (netGuestPaused) resume(); else pause(); }
-      else if (k === 'm') { muted = !muted; feed(muted ? 'sound <b>off</b>' : 'sound <b>on</b>', true); }
       else if (GB[k] !== undefined && !netGuestPaused && !e.repeat) guestHits |= 1 << GB[k];
       if (['w', 'a', 's', 'd', ' '].indexOf(k) >= 0) e.preventDefault();
       return;
@@ -5215,7 +5365,7 @@
     if (state === 'play') {
       var kp = kbPlayer();
       if (kp.air === 'plane' && (k === 'e' || k === ' ')) kp.jumpReq = true;
-      if (kp.air) { if (k === 'escape') pause(); if (k === 'm') { muted = !muted; } return; }
+      if (kp.air) { if (k === 'escape') pause(); return; }
       if (k === 'r') startReload(kp);
       else if (k === 'e') playerPickup(kp);
       else if (k === 'q') swapSlot(undefined, kp);
@@ -5226,7 +5376,6 @@
       else if (k === 'h') throwNade(kp, 'smoke');
       else if (k === 'v') melee(kp);
       else if (k === 'x' && kp.down) { kp.hp = 0; kill(kp, -1); }
-      else if (k === 'm') { muted = !muted; feed(muted ? 'sound <b>off</b>' : 'sound <b>on</b>', true); }
       else if (k === 'escape') pause();
     } else if (k === 'escape' && state === 'paused') { if (settingsOpenFromPause()) $('setBack').click(); else resume(); }
     if (['w', 'a', 's', 'd', ' '].indexOf(k) >= 0) e.preventDefault();
@@ -5400,6 +5549,7 @@
 
   function syncSettings() {
     $('setVol').value = SET.vol; $('setVolV').textContent = SET.vol;
+    $('setMusic').value = SET.music; $('setMusicV').textContent = SET.music;
     $('setDead').value = SET.dead; $('setDeadV').textContent = SET.dead;
     [['setShake', 'shake'], ['setMap', 'minimap']].forEach(function (pair) {
       var b = $(pair[0]);
@@ -5410,6 +5560,9 @@
     $('padTag').textContent = pad ? ('controller: ' + String(pad.id).slice(0, 38))
                                   : (padSeen ? 'controller disconnected' : 'no controller detected');
   }
+  $('setMusic').addEventListener('input', function () {
+    SET.music = parseInt(this.value, 10); $('setMusicV').textContent = SET.music; saveSettings();
+  });
   $('setVol').addEventListener('input', function () {
     SET.vol = parseInt(this.value, 10); $('setVolV').textContent = SET.vol; saveSettings();
   });
@@ -5543,6 +5696,7 @@
     try { if (netConn) netConn.close(); } catch (err) {}
     try { if (netPeer) netPeer.destroy(); } catch (err) {}
     netConn = null; netPeer = null; netRole = null; netPublic = false; netCode = '';
+    if (typeof queueOn !== 'undefined') queueOn = false;
     $('netCodeBox').hidden = true;
     if (wasGuest && (netGuest || state !== 'menu')) { goHome(); openOnline(); }
     netStatus(why || 'Disconnected.');
@@ -5616,6 +5770,7 @@
       }
       netGuests.push(g);
       feed('<b>' + g.name + '</b> joined', true);
+      if (queueOn) { queueSay = 0; lobbyT = 0.2; }
       if (state === 'play' || state === 'paused') {
         if (admitGuest(g, false)) netSendTo(g, startMsg(g));
         else netSendTo(g, { t: 'wait', why: 'Match in progress - you will be in the next one.' });
@@ -5704,6 +5859,7 @@
 
   function netHostTick(dt) {
     lobbyTick(dt);
+    if (queueOn) queueTick(dt);
     // a guest who has gone quiet for a long while has gone; the browser can
     // take ages to report a closed tab on its own
     var nowT = performance.now();
@@ -5833,6 +5989,7 @@
     }
     else if (m.t === 'party') { partyList = m.names || []; partyRender(); }
     else if (m.t === 'wait') netStatus(m.why);
+    else if (m.t === 'queue') netStatus(m.msg);
     else if (m.t === 'full') { netClose('That match is full.'); if (quickFail) quickFail(); }
     else if (m.t === 'start') guestStart(m);
     else if (m.t === 'over') guestOver(m);
@@ -5860,7 +6017,7 @@
     kills = 0; shots = 0; hits = 0; matchTime = 0; score = [0, 0]; result = null;
     charCache = {};
     elFeed.innerHTML = '';
-    ['menu', 'over', 'paused', 'shop', 'settings', 'online'].forEach(function (id) { $(id).hidden = true; });
+    ['menu', 'over', 'paused', 'shop', 'settings', 'online', 'friends', 'account'].forEach(function (id) { $(id).hidden = true; });
     elHud.hidden = false; elHud.classList.remove('split');
     netGuest = true; netGuestPaused = false;
     state = 'play';
@@ -6053,6 +6210,13 @@
   var fbReady = false, fbLoading = null, fbAuth = null, fbDb = null, fbUser = null;
   var fbFriends = [], fbInvUnsub = null, fbBeatT = null, fbWalletT = null, fbProfileTries = 0;
 
+  function friendStatus(t) { var el = $('friendStatus'); if (el) el.textContent = t; }
+  function openFriends() {
+    ['menu', 'online'].forEach(function (id) { $(id).hidden = true; });
+    $('friends').hidden = false;
+    renderAcct();
+    renderFriends();
+  }
   function acctStatus(t) { var el = $('acctStatus'); if (el) el.textContent = t; }
   function quickStatus(t) { netStatus(t); var el = $('quickStatus'); if (el) { el.textContent = t; el.hidden = !t; } }
 
@@ -6194,7 +6358,7 @@
     $('friendsNeed').hidden = on;
   }
   function openAccount(msg) {
-    ['menu', 'online'].forEach(function (id) { $(id).hidden = true; });
+    ['menu', 'online', 'friends'].forEach(function (id) { $(id).hidden = true; });
     $('account').hidden = false;
     acctStatus(msg || '');
     loadFirebase(function () {});
@@ -6205,19 +6369,19 @@
   function addFriend() {
     var nm = $('friendName').value.trim().toLowerCase();
     if (!fbUser) { openAccount('Log in to add friends.'); return; }
-    if (!/^[a-z0-9_]{3,16}$/.test(nm)) { netStatus('Type their username.'); return; }
+    if (!/^[a-z0-9_]{3,16}$/.test(nm)) { friendStatus('Type their username.'); return; }
     fbDb.collection('usernames').doc(nm).get().then(function (d) {
-      if (!d.exists) { netStatus('Nobody is called ' + nm + '.'); return; }
+      if (!d.exists) { friendStatus('Nobody is called ' + nm + '.'); return; }
       var uid = d.data().uid;
-      if (uid === fbUser.uid) { netStatus('That is you!'); return; }
-      if (fbFriends.indexOf(uid) >= 0) { netStatus('Already on your list.'); return; }
+      if (uid === fbUser.uid) { friendStatus('That is you!'); return; }
+      if (fbFriends.indexOf(uid) >= 0) { friendStatus('Already on your list.'); return; }
       return fbDb.collection('users').doc(fbUser.uid).update({ friends: firebase.firestore.FieldValue.arrayUnion(uid) }).then(function () {
         fbFriends.push(uid);
         $('friendName').value = '';
-        netStatus('Added ' + d.data().name + '.');
+        friendStatus('Added ' + d.data().name + '.');
         renderFriends();
       });
-    }).catch(function (err) { netStatus(errText(err)); });
+    }).catch(function (err) { friendStatus(errText(err)); });
   }
   function removeFriend(uid) {
     fbDb.collection('users').doc(fbUser.uid).update({ friends: firebase.firestore.FieldValue.arrayRemove(uid) }).then(function () {
@@ -6251,7 +6415,7 @@
         if (online && f.partyHost && f.party && f.party !== netCode) {
           var jb = document.createElement('button');
           jb.className = 'tgl on'; jb.type = 'button'; jb.textContent = 'JOIN';
-          jb.addEventListener('click', function () { joinGame(f.party, false); });
+          jb.addEventListener('click', function () { $('friends').hidden = true; openOnline(); joinGame(f.party, false); });
           row.appendChild(jb);
         }
         if (online) {
@@ -6275,7 +6439,7 @@
     hostGame(function () {
       fbDb.collection('invites').doc(f.uid).collection('items').add({
         from: fbUser.uid, fromName: acctName, code: netCode, at: Date.now()
-      }).then(function () { netStatus('Invite sent to ' + f.name + '.'); heartbeat(); })
+      }).then(function () { friendStatus('Invite sent to ' + f.name + '. You are hosting - they join your party.'); heartbeat(); })
         .catch(function (err) { netStatus(errText(err)); });
     });
   }
@@ -6319,7 +6483,7 @@
         var L = d.data();
         if (now - (L.updated || 0) < 30000 && L.humans < L.max && L.map === mapKind && L.host !== fbUser.uid) list.push(L);
       });
-      list.sort(function (a, b) { return b.humans - a.humans; });
+      list.sort(function (a, b) { return ((b.wait ? 1 : 0) - (a.wait ? 1 : 0)) || (b.humans - a.humans); });
       tryLobby(list, 0);
     }).catch(function () { goPublicHost(); });
   }
@@ -6330,17 +6494,37 @@
     joinGame(list[i].code, true, function () { var f = quickFail; quickFail = null; if (f) f(); });
   }
   // nobody to join: open our own public match, which others will find
+  // Open a public lobby and hold it: the match starts when it is full, or
+  // after 20 seconds with bots in the empty seats.
+  var QUEUE_TIME = 20, queueOn = false, queueT = 0, queueSay = 0;
+  function queueCap() { return Math.min(NET_MAX, MODES[mode].field); }
   function goPublicHost() {
-    quickStatus('No open match - starting one. Others can drop in.');
     hostGame(function () {
       netPublic = true;
+      queueOn = true; queueT = QUEUE_TIME; queueSay = 0;
+      openOnline();
       lobbyWrite();
+    });
+  }
+  function queueTick(dt) {
+    if (!queueOn || netRole !== 'host') { queueOn = false; return; }
+    queueT -= dt; queueSay -= dt;
+    var n = humansIn(), cap = queueCap();
+    if (queueSay <= 0) {
+      queueSay = 0.5;
+      var msg = 'Waiting for players ' + n + '/' + cap + ' \u00b7 starting in ' + Math.max(0, Math.ceil(queueT)) + 's - bots fill any empty seats';
+      quickStatus(msg);
+      netSendAll({ t: 'queue', msg: msg });
+    }
+    if (n >= cap || queueT <= 0) {
+      queueOn = false;
       quickStatus('');
       startMatch();
-    });
+    }
   }
   var lobbyT = 0;
   function lobbyOpen() {
+    if (queueOn) return humansIn() < queueCap();
     if (state !== 'play' && state !== 'paused') return false;
     if (humansIn() >= Math.min(NET_MAX, fieldN)) return false;
     if (mode === 'br') return !!plane && plane.t < plane.dur * 0.75;   // only while there are seats on the plane
@@ -6350,7 +6534,7 @@
     if (!fbDb || !fbUser || !netCode || !netPublic) return;
     fbDb.collection('lobbies').doc(netCode).set({
       host: fbUser.uid, name: acctName, code: netCode, mode: mode, map: mapKind,
-      humans: humansIn(), max: Math.min(NET_MAX, fieldN), open: lobbyOpen(), updated: Date.now()
+      humans: humansIn(), max: queueCap(), open: lobbyOpen(), wait: queueOn, updated: Date.now()
     }).catch(function () {});
   }
   lobbyTouch = function () { if (netPublic) { lobbyT = 0.2; } };
@@ -6371,6 +6555,8 @@
   $('acctBack').addEventListener('click', closeAccount);
   $('quickBtn').addEventListener('click', quickPlay);
   $('friendAdd').addEventListener('click', addFriend);
+  $('friendsBtn').addEventListener('click', openFriends);
+  $('friendsBack').addEventListener('click', function () { $('friends').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('friendsNeed').addEventListener('click', function () { openAccount(''); });
   $('inviteJoin').addEventListener('click', function () { answerInvite(true); });
   $('inviteNo').addEventListener('click', function () { answerInvite(false); });
@@ -6382,7 +6568,7 @@
     });
   });
   // the friends list keeps itself fresh while you are looking at it
-  setInterval(function () { if (!$('online').hidden && fbUser) renderFriends(); }, 15000);
+  setInterval(function () { if (!$('friends').hidden && fbUser) renderFriends(); }, 15000);
   loadFirebase(function () {});
 
   // ---------------------------------------------------------------- loop
@@ -6393,9 +6579,11 @@
     if (state === 'play') {
       if (netGuest) guestTick(Math.max(dt, 0.0001));
       else update(Math.max(dt, 0.0001));
+      if (netGuest && netGuestPaused) uiPad(dt);
     }
     else uiPad(dt);
     if (netRole === 'host') netHostTick(dt);
+    musicTick();
     render();
     requestAnimationFrame(frame);
   }

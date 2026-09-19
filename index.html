@@ -134,6 +134,16 @@ h1 .gold{color:var(--gold)}
 .joinrow input.wide,.acctform input{width:260px;padding:11px 12px;font-family:var(--font-m);font-size:14px;font-weight:600;letter-spacing:.14em;text-align:center;background:var(--paper);color:var(--out);border:3px solid var(--out);border-radius:4px}
 .ptitle.sm{font-size:clamp(22px,6vw,30px)}
 .toast{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--navy);border:3px solid var(--out);border-radius:4px;box-shadow:4px 4px 0 rgba(0,0,0,.45);font-family:var(--font-m);font-size:12px;letter-spacing:.1em;color:var(--paper);pointer-events:auto;max-width:calc(100% - 32px)}
+.osk{z-index:30;background:rgba(10,9,7,.94)}
+.osklabel{font-family:var(--font-x);font-size:12px;letter-spacing:.24em;color:var(--gold);text-transform:uppercase}
+.osktext{min-width:260px;padding:12px 16px;font-family:var(--font-m);font-size:18px;font-weight:600;letter-spacing:.16em;background:var(--paper);color:var(--out);border:3px solid var(--out);border-radius:4px;min-height:1.6em}
+.oskkeys{display:flex;flex-direction:column;align-items:center;gap:6px}
+.oskrow{display:flex;gap:6px;justify-content:center}
+.oskk{appearance:none;min-width:38px;height:40px;padding:0 8px;font-family:var(--font-m);font-size:14px;font-weight:600;background:var(--navy);color:var(--paper);border:2px solid var(--out);border-radius:4px;cursor:pointer}
+.oskk.wide{min-width:96px;font-size:12px;letter-spacing:.12em}
+.oskk.done{background:var(--gold);color:var(--out)}
+.oskk:focus{outline:3px solid var(--gold);outline-offset:1px}
+@media (max-width:480px){.oskk{min-width:28px;height:36px;padding:0 4px;font-size:12px}.oskrow{gap:4px}}
 .ptitle{margin:0;font-family:var(--font-x);font-weight:400;font-size:clamp(32px,8.5vw,50px);letter-spacing:.14em;text-indent:.14em;line-height:1;color:var(--paper);-webkit-text-stroke:2px var(--out);paint-order:stroke fill;text-shadow:4px 4px 0 var(--out)}
 .pbtns{display:flex;flex-direction:column;align-items:center;gap:16px}
 .setlist{width:100%;max-width:440px;display:flex;flex-direction:column;gap:2px;background:var(--out);border:3px solid var(--out);box-shadow:4px 4px 0 rgba(0,0,0,.45)}
@@ -292,7 +302,8 @@ h1 .gold{color:var(--gold)}
         <button class="go" id="startBtn" type="button">DROP IN</button>
         <button class="go" id="tutBtn" type="button">TUTORIAL</button>
         <button class="go" id="quickBtn" type="button">QUICK PLAY ONLINE</button>
-        <button class="go ghost" id="onlineBtn" type="button">FRIENDS &amp; PARTY</button>
+        <button class="go ghost" id="onlineBtn" type="button">PARTY</button>
+        <button class="go ghost" id="friendsBtn" type="button">FRIENDS</button>
         <button class="go ghost" id="shopBtn" type="button">SKINS &middot; <span id="menuCoins">0</span> CR</button>
         <button class="go ghost" id="setBtn" type="button">SETTINGS</button>
       </div>
@@ -317,11 +328,22 @@ h1 .gold{color:var(--gold)}
         </div>
       </div>
 
-      <div class="brand">
-        <h2 class="ptitle sm">FRIENDS</h2>
-        <div class="rule"></div>
+      <div class="pbtns">
+        <button class="go ghost" id="netLeave" type="button">LEAVE PARTY</button>
+        <button class="go ghost" id="netBack" type="button">BACK</button>
       </div>
-      <button class="go ghost" id="friendsNeed" type="button">LOG IN FOR FRIENDS</button>
+    </div>
+  </div>
+
+  <div class="screen" id="friends" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h2 class="ptitle">FRIENDS</h2>
+        <div class="rule"></div>
+        <div class="tag">see who is on, invite them, jump in</div>
+      </div>
+      <p class="modedesc" id="friendStatus">Add friends by their username.</p>
+      <button class="go" id="friendsNeed" type="button">LOG IN FOR FRIENDS</button>
       <div class="friends" id="friendsBox" hidden>
         <div class="joinrow">
           <input class="wide" id="friendName" maxlength="16" placeholder="USERNAME" autocomplete="off" spellcheck="false" aria-label="Friend's username">
@@ -329,10 +351,8 @@ h1 .gold{color:var(--gold)}
         </div>
         <div class="flist" id="friendList"></div>
       </div>
-
       <div class="pbtns">
-        <button class="go ghost" id="netLeave" type="button">LEAVE PARTY</button>
-        <button class="go ghost" id="netBack" type="button">BACK</button>
+        <button class="go ghost" id="friendsBack" type="button">BACK</button>
       </div>
     </div>
   </div>
@@ -358,6 +378,15 @@ h1 .gold{color:var(--gold)}
     </div>
   </div>
 
+  <div class="screen osk" id="osk" hidden>
+    <div class="panel">
+      <div class="osklabel" id="oskLabel"></div>
+      <div class="osktext" id="oskText"> </div>
+      <div class="oskkeys" id="oskKeys"></div>
+      <p class="modedesc">A types &#183; X deletes &#183; Y or START finishes &#183; B deletes, then closes</p>
+    </div>
+  </div>
+
   <div class="toast" id="inviteToast" hidden>
     <span id="inviteText"></span>
     <button class="tgl on" id="inviteJoin" type="button">JOIN</button>
@@ -373,6 +402,7 @@ h1 .gold{color:var(--gold)}
       </div>
       <div class="setlist">
         <div class="setrow"><span>MASTER VOLUME</span><input type="range" id="setVol" min="0" max="100" step="1"><b id="setVolV">66</b></div>
+        <div class="setrow"><span>MUSIC</span><input type="range" id="setMusic" min="0" max="100" step="1"><b id="setMusicV">45</b></div>
         <div class="setrow"><span>STICK DEADZONE</span><input type="range" id="setDead" min="5" max="40" step="1"><b id="setDeadV">18</b></div>
         <div class="setrow"><span>SCREEN SHAKE</span><button class="tgl" id="setShake" type="button">ON</button></div>
         <div class="setrow"><span>MINIMAP</span><button class="tgl" id="setMap" type="button">ON</button></div>
@@ -431,7 +461,7 @@ h1 .gold{color:var(--gold)}
 <script src="assets/pack-data.js"></script>
 <script src="assets/sfx-data.js"></script>
 <script>
-  // Art. Every sheet is already cut out, so chroma keying stays off — it would
+  // Art. Every sheet is already cut out, so chroma keying stays off &#8212; it would
   // eat the dark pixels of the sprites themselves.
   EARSHOT.loadPack({
     data: window.EARSHOT_PACK,
