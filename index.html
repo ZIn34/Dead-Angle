@@ -152,6 +152,10 @@ h1 .gold{color:var(--gold)}
 .cmsg.sys{align-self:center;background:transparent;border:0;color:var(--khaki)}
 .joinrow input.chatin{width:min(300px,60vw);text-align:left;letter-spacing:.04em;text-transform:none}
 .frow .fhint{font-size:8px;color:var(--khaki)}
+.pchat{width:100%;display:flex;flex-direction:column;align-items:center;gap:8px}
+.chatlog.small{height:min(24vh,170px)}
+.igchat{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);z-index:25;width:min(520px,calc(100% - 32px))}
+.igchat input{width:100%;padding:10px 12px;font-family:var(--font-m);font-size:13px;background:rgba(241,231,208,.95);color:var(--out);border:3px solid var(--out);border-radius:4px}
 .ptitle{margin:0;font-family:var(--font-x);font-weight:400;font-size:clamp(32px,8.5vw,50px);letter-spacing:.14em;text-indent:.14em;line-height:1;color:var(--paper);-webkit-text-stroke:2px var(--out);paint-order:stroke fill;text-shadow:4px 4px 0 var(--out)}
 .pbtns{display:flex;flex-direction:column;align-items:center;gap:16px}
 .setlist{width:100%;max-width:440px;display:flex;flex-direction:column;gap:2px;background:var(--out);border:3px solid var(--out);box-shadow:4px 4px 0 rgba(0,0,0,.45)}
@@ -294,6 +298,14 @@ h1 .gold{color:var(--gold)}
             <button type="button" data-d="2" aria-pressed="false">RUTHLESS</button>
           </div>
         </div>
+        <div class="pick">
+          <p>BOTS</p>
+          <div class="row" id="botsRow">
+            <button type="button" data-b="1" aria-pressed="true">FULL LOBBY</button>
+            <button type="button" data-b="0.5" aria-pressed="false">HALF</button>
+            <button type="button" data-b="0.25" aria-pressed="false">FEW</button>
+          </div>
+        </div>
         <p class="modedesc" id="modeDesc"></p>
       </div>
 
@@ -304,6 +316,8 @@ h1 .gold{color:var(--gold)}
         <span><kbd>Q</kbd> swap</span>
         <span><kbd>R</kbd> reload</span>
         <span><kbd>F</kbd> stim</span>
+        <span><kbd>Z</kbd> drop weapon</span>
+        <span><kbd>T</kbd> party chat</span>
         <span><kbd>SHIFT</kbd> sprint &mdash; loud</span>
       </div>
       <div class="pbtns">
@@ -330,6 +344,13 @@ h1 .gold{color:var(--gold)}
         <button class="go" id="netHost" type="button">HOST A PARTY</button>
         <div class="netcode" id="netCodeBox" hidden>PARTY CODE<b id="netCode">-----</b></div>
         <div class="plist" id="partyList" hidden></div>
+        <div class="pchat" id="partyChat" hidden>
+          <div class="chatlog small" id="pchatLog"></div>
+          <div class="joinrow">
+            <input class="wide chatin" id="pchatInput" maxlength="120" placeholder="PARTY CHAT" autocomplete="off" aria-label="Party chat">
+            <button class="go ghost" id="pchatSend" type="button">SEND</button>
+          </div>
+        </div>
         <div class="picks" id="partyPick" hidden>
           <div class="pick">
             <p>MODE</p>
@@ -356,6 +377,19 @@ h1 .gold{color:var(--gold)}
             <div class="row" id="partySquadRow">
               <button type="button" data-s="1">SOLO - RIVALS</button>
               <button type="button" data-s="2">DUOS - PARTNERS</button>
+            </div>
+          </div>
+          <div class="pick">
+            <p>BOTS</p>
+            <div class="row" id="partyDiffRow">
+              <button type="button" data-d="0">CALM</button>
+              <button type="button" data-d="1">STANDARD</button>
+              <button type="button" data-d="2">RUTHLESS</button>
+            </div>
+            <div class="row" id="partyBotsRow">
+              <button type="button" data-b="1">FULL LOBBY</button>
+              <button type="button" data-b="0.5">HALF</button>
+              <button type="button" data-b="0.25">FEW</button>
             </div>
           </div>
           <button class="go" id="partyStart" type="button">START MATCH</button>
@@ -439,6 +473,10 @@ h1 .gold{color:var(--gold)}
       <div class="oskkeys" id="oskKeys"></div>
       <p class="modedesc">A types &#183; X deletes &#183; Y or START finishes &#183; B deletes, then closes</p>
     </div>
+  </div>
+
+  <div class="igchat" id="igChat" hidden>
+    <input id="igChatInput" maxlength="120" placeholder="SAY TO YOUR PARTY - ENTER TO SEND, ESC TO CANCEL" autocomplete="off" aria-label="Party chat">
   </div>
 
   <div class="toast" id="inviteToast" hidden>

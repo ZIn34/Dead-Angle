@@ -1176,6 +1176,7 @@
   // ---------------------------------------------------------------- state
   var state = 'menu';
   var difficulty = 1, mode = 'br', mapKind = 'cqb', blackout = false, squad = 1;
+  var botFill = 1;                   // share of the usual bot count: 1, 0.5 or 0.25
   // Everyone starts in plain grey; credits come from playing and buy the rest.
   var BASE_SKIN = 9;
   var WALLET = { coins: 0, owned: [BASE_SKIN], skin: BASE_SKIN };
@@ -1620,6 +1621,13 @@
     var per = MODE.teams ? (MODE.field >> 1) : squad;
     fieldN = MODE.field;
     if (squad > 1 && !MODE.teams && mode === 'duel') fieldN = 4;   // 1v1 becomes 2v2
+    // fewer bots if asked, never so few there is nobody to fight
+    if (botFill < 1 && mode !== 'duel' && mode !== 'tut') {
+      var humN = 1 + (netRole === 'host' ? netGuests.length : 0) + (splitWant ? 1 : 0);
+      fieldN = Math.max(humN + 2, Math.round(fieldN * botFill));
+      if (MODE.teams && fieldN % 2) fieldN++;
+    }
+    alive = fieldN;
     var sp = MODE.teams ? teamSpawns(fieldN)
            : (squad > 1 ? squadSpawns(Math.ceil(fieldN / squad), squad) : pickSpawns(fieldN));
     player = makeEnt(sp[0], true, 'YOU');
@@ -1987,7 +1995,7 @@
       if (ctx.measureText(tryL).width > maxW - 36 && line) { lines.push(line); line = words[w]; } else line = tryL;
     }
     if (line) lines.push(line);
-    var miniB = SET.minimap ? 16 + Math.round(Math.min(148, Math.min(cw, ch) * 0.30)) + 12 : 0;
+    var miniB = 0;
     var bw = maxW, bh = 52 + lines.length * 19, bx = cw / 2 - bw / 2, by = Math.max(ch * 0.14, miniB, 84);
     ctx.fillStyle = '#2e4559'; ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 3;
     ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh);
@@ -3157,6 +3165,7 @@
       if (I.hit(5)) throwNade(e, 'smoke');
       if (I.hit(6)) throwNade(e, 'frag');
       if (I.hit(12)) useMed(e);
+      if (I.hit(13)) dropWeapon(e);
       if (I.hit(9)) { pause(); return; }
     }
     if (!padMove && I.touch && sticks.move) {
@@ -3229,6 +3238,21 @@
     if (idx >= 0) takeGun(e, it, idx);
     e.prompt = null;
     if (e === player) promptItem = null;
+  }
+  // Put down what is in your hands, loaded as it is, for a friend (or anyone).
+  function dropWeapon(e) {
+    if (!e || !e.alive || e.down || e.air || mode === 'gun') return;
+    var sl = curSlot(e);
+    if (!sl || !WEAPONS[sl.key]) return;
+    loot.push({
+      x: e.x + Math.cos(e.ang) * 20, y: e.y + Math.sin(e.ang) * 20, type: 'gun', key: sl.key,
+      spin: rr(0, 6.2832), ammo: sl.ammo, n: 0, seen: true
+    });
+    e.slots[e.slot] = null;
+    e.reloadT = 0;
+    var other = e.slot === 0 ? 1 : 0;
+    if (e.slots[other]) e.slot = other;
+    audioEmit(e.x, e.y, PICK_SND, e.id);
   }
   function swapSlot(n, e) {
     e = e || kbPlayer();
@@ -4671,8 +4695,6 @@
   // comms with them. Enemies stay unmarked.
   function renderAllies() {
     if (!player.alive) return;
-    // Everyone on your side, nearest first. Marking a forty-strong horde
-    // would be useless, so only the closest handful get one.
     var mates = [];
     for (var i = 0; i < ents.length; i++) {
       var a = ents[i];
@@ -4680,46 +4702,51 @@
       mates.push(a);
     }
     if (!mates.length) return;
-    mates.sort(function (x, y) { return dist(x, player) - dist(y, player); });
-    if (mates.length > 8) mates.length = 8;
-
+    // real players first, then the nearest bots
+    mates.sort(function (x, y) {
+      return ((x.bot ? 1 : 0) - (y.bot ? 1 : 0)) || (dist(x, player) - dist(y, player));
+    });
+    var shownBots = 0;
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
     for (var m = 0; m < mates.length; m++) {
       var t = mates[m];
+      if (t.bot && ++shownBots > 8) continue;
+      var human = !t.bot;
+      var tint = t.down ? '#ff4d8d' : (human ? '#f2bd1d' : '#7ce7d8');
       var sx = (t.x - cam.x) * zoom + cw / 2;
       var sy = (t.y - cam.y) * zoom + ch / 2;
-      var pad = 26;
+      var pad = 30;
       var off = sx < pad || sx > cw - pad || sy < pad || sy > ch - pad;
       var ang = Math.atan2(t.y - player.y, t.x - player.x);
       var d = Math.round(dist(t, player));
       sx = clamp(sx, pad, cw - pad);
       sy = clamp(sy, pad, ch - pad);
-
-      ctx.strokeStyle = t.down ? 'rgba(255,77,141,.95)' : 'rgba(124,231,216,.9)';
-      ctx.fillStyle = t.down ? 'rgba(255,77,141,.95)' : 'rgba(124,231,216,.9)';
-      ctx.lineWidth = 2;
-
+      ctx.fillStyle = tint;
+      ctx.strokeStyle = '#0d0f12';
       if (off) {
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(ang);
-        ctx.beginPath();
-        ctx.moveTo(-5, -6); ctx.lineTo(5, 0); ctx.lineTo(-5, 6);
-        ctx.stroke();
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(-7, -8); ctx.lineTo(8, 0); ctx.lineTo(-7, 8); ctx.closePath();
+        ctx.stroke(); ctx.fill();
         ctx.restore();
-        ctx.font = '600 8.5px "IBM Plex Mono", monospace';
-        ctx.fillText(d + 'u', sx, sy + 17);
+        ctx.font = '700 9px "IBM Plex Mono", monospace';
+        ctx.lineWidth = 3;
+        var lbl = (human ? t.name + ' ' : '') + d + 'u';
+        ctx.strokeText(lbl, sx, sy + 18); ctx.fillText(lbl, sx, sy + 18);
       } else {
-        // a chevron and a name, sat above their head
+        // a solid marker and a name over their head
+        ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(sx - 6, sy - 26); ctx.lineTo(sx, sy - 18); ctx.lineTo(sx + 6, sy - 26);
-        ctx.stroke();
-        ctx.font = '600 8.5px "IBM Plex Mono", monospace';
-        ctx.globalAlpha = 0.85;
-        ctx.fillText(t.down ? t.name + ' DOWN' : t.name, sx, sy - 34);
-        ctx.globalAlpha = 1;
+        ctx.moveTo(sx - 8, sy - 30); ctx.lineTo(sx + 8, sy - 30); ctx.lineTo(sx, sy - 19); ctx.closePath();
+        ctx.stroke(); ctx.fill();
+        ctx.font = (human ? '700 10px' : '600 9px') + ' "IBM Plex Mono", monospace';
+        var nm = t.down ? t.name + ' DOWN' : t.name;
+        ctx.strokeText(nm, sx, sy - 40); ctx.fillText(nm, sx, sy - 40);
       }
     }
     ctx.textAlign = 'left';
@@ -4906,7 +4933,8 @@
     miniAge--;
 
     var S = Math.round(Math.min(148, Math.min(cw, ch) * 0.30));
-    var bx = 16, by = 16;
+    // bottom left, above your health and kit
+    var bx = 16, by = Math.max(60, ch - S - (splitOn ? 78 : 158));
     var span = MAP_W * TILE;
     function mx(wx) { return bx + (wx / span) * S; }
     function my(wy) { return by + (wy / (MAP_H * TILE)) * S; }
@@ -5357,8 +5385,9 @@
     kbmLast = performance.now();
     var k = e.key.toLowerCase();
     keys[k] = true;
+    if (netRole && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden) { e.preventDefault(); openIgChat(); return; }
     if (netGuest && state === 'play') {
-      var GB = { 'e': 0, ' ': 0, 'v': 1, 'x': 1, 'r': 2, 'f': 3, 'h': 5, 'g': 6, 'q': 14, '1': 14, '2': 14 };
+      var GB = { 'e': 0, ' ': 0, 'v': 1, 'x': 1, 'r': 2, 'f': 3, 'h': 5, 'g': 6, 'q': 14, '1': 14, '2': 14, 'z': 13 };
       if (k === 'escape') { if (settingsOpenFromPause()) $('setBack').click(); else if (netGuestPaused) resume(); else pause(); }
       else if (GB[k] !== undefined && !netGuestPaused && !e.repeat) guestHits |= 1 << GB[k];
       if (['w', 'a', 's', 'd', ' '].indexOf(k) >= 0) e.preventDefault();
@@ -5377,6 +5406,7 @@
       else if (k === 'g') throwNade(kp, 'frag');
       else if (k === 'h') throwNade(kp, 'smoke');
       else if (k === 'v') melee(kp);
+      else if (k === 'z') dropWeapon(kp);
       else if (k === 'x' && kp.down) { kp.hp = 0; kill(kp, -1); }
       else if (k === 'escape') pause();
     } else if (k === 'escape' && state === 'paused') { if (settingsOpenFromPause()) $('setBack').click(); else resume(); }
@@ -5483,7 +5513,22 @@
   partyPickRow('partyModeRow', 'modeRow', 'data-m', function (v) { mode = v; });
   partyPickRow('partyMapRow', 'mapRow', 'data-p', function (v) { mapKind = v; });
   partyPickRow('partySquadRow', 'squadRow', 'data-s', function (v) { squad = parseInt(v, 10); });
+  partyPickRow('partyDiffRow', 'diffRow', 'data-d', function (v) { difficulty = parseInt(v, 10); });
+  partyPickRow('partyBotsRow', 'botsRow', 'data-b', function (v) { botFill = parseFloat(v); });
   $('partyStart').addEventListener('click', function () { startMatch(); });
+  $('pchatSend').addEventListener('click', function () { sendPartyChat($('pchatInput').value); $('pchatInput').value = ''; });
+  $('pchatInput').addEventListener('keydown', function (ev) {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') { sendPartyChat(this.value); this.value = ''; }
+  });
+  // in a match: T (or Enter) to say something to the party
+  $('igChatInput').addEventListener('keydown', function (ev) {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') { sendPartyChat(this.value); this.value = ''; closeIgChat(); }
+    else if (ev.key === 'Escape') closeIgChat();
+  });
+  function openIgChat() { keys = {}; mouse.down = false; $('igChat').hidden = false; $('igChatInput').focus(); }
+  function closeIgChat() { $('igChat').hidden = true; $('igChatInput').blur(); }
   $('modeRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
     if (!b) return;
@@ -5497,6 +5542,12 @@
     mapKind = b.getAttribute('data-p');
     pressRow(this, 'data-p', mapKind);
     syncMenu();
+  });
+  $('botsRow').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button');
+    if (!b) return;
+    botFill = parseFloat(b.getAttribute('data-b'));
+    pressRow(this, 'data-b', b.getAttribute('data-b'));
   });
   $('diffRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
@@ -5712,6 +5763,7 @@
     try { if (netConn) netConn.close(); } catch (err) {}
     try { if (netPeer) netPeer.destroy(); } catch (err) {}
     netConn = null; netPeer = null; netRole = null; netPublic = false; netCode = '';
+    pchat = []; if ($('pchatLog')) $('pchatLog').innerHTML = '';
     if (typeof queueOn !== 'undefined') queueOn = false;
     $('netCodeBox').hidden = true;
     if (wasGuest && (netGuest || state !== 'menu')) { goHome(); openOnline(); }
@@ -5776,6 +5828,8 @@
     if (m.t === 'in') {
       g.in.ax = m.ax || [0, 0]; g.in.aim = m.aim; g.in.down = m.down | 0;
       g.in.hits |= m.hits | 0;
+    } else if (m.t === 'pchat') {
+      partySay(g.name, m.text);
     } else if (m.t === 'hi') {
       g.name = String(m.name || 'PLAYER').replace(/[^A-Za-z0-9_]/g, '').slice(0, 16) || 'PLAYER';
       g.skin = clamp(m.skin | 0, 0, 15); g.uid = String(m.uid || ''); g.party = !m.pub;
@@ -5936,7 +5990,8 @@
   }
   function partyBroadcast() {
     if (netRole === 'host') netSendAll({ t: 'party', names: partyNames(), code: netCode,
-      pick: MODE_LABEL[mode] + (mode !== 'duel' ? ' \u00b7 ' + mapKind.toUpperCase() : '') + (MODES[mode].teams ? '' : (squad > 1 ? ' \u00b7 DUOS' : ' \u00b7 SOLO')) });
+      pick: MODE_LABEL[mode] + (mode !== 'duel' ? ' \u00b7 ' + mapKind.toUpperCase() : '') + (MODES[mode].teams ? '' : (squad > 1 ? ' \u00b7 DUOS' : ' \u00b7 SOLO')) +
+        ' \u00b7 ' + ['CALM', 'STANDARD', 'RUTHLESS'][difficulty] + ' BOTS' + (botFill < 1 ? (botFill < 0.5 ? ' (FEW)' : ' (HALF)') : '') });
   }
   var partyList = [];
   function partyRender() {
@@ -5951,6 +6006,7 @@
       el.appendChild(d);
     });
     el.hidden = !names.length;
+    pchatVisible();
     // the host picks the match right here once anyone has joined
     var pp = $('partyPick');
     if (pp) {
@@ -5958,9 +6014,56 @@
       pressRow($('partyModeRow'), 'data-m', mode);
       pressRow($('partyMapRow'), 'data-p', mapKind);
       pressRow($('partySquadRow'), 'data-s', String(squad));
+      pressRow($('partyDiffRow'), 'data-d', String(difficulty));
+      pressRow($('partyBotsRow'), 'data-b', String(botFill));
       $('partyMapPick').hidden = mode === 'duel';
       $('partySquadPick').hidden = !!MODES[mode].teams;
     }
+  }
+
+  // ---- party chat: rides the same connection as the game ----
+  var pchat = [];
+  function escHtml(t) { return String(t).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+  function pchatAdd(from, text) {
+    pchat.push({ from: from, text: text });
+    if (pchat.length > 60) pchat.shift();
+    var log = $('pchatLog');
+    if (log) {
+      var d = document.createElement('div');
+      d.className = 'cmsg' + (from === (acctName || (netRole === 'host' ? 'HOST' : 'PLAYER')) ? ' me' : '');
+      var b = document.createElement('b'); b.textContent = from;
+      var sp = document.createElement('span'); sp.textContent = text;
+      d.appendChild(b); d.appendChild(sp);
+      log.appendChild(d);
+      while (log.children.length > 60) log.removeChild(log.firstChild);
+      log.scrollTop = log.scrollHeight;
+    }
+    // in a match it shows in the feed, top right
+    if (state === 'play' || state === 'paused') {
+      var f = document.createElement('div');
+      f.className = 'you';
+      f.innerHTML = '<b>' + escHtml(from) + '</b>: ' + escHtml(text);
+      elFeed.appendChild(f);
+      while (elFeed.children.length > 6) elFeed.removeChild(elFeed.firstChild);
+      setTimeout(function () { if (f.parentNode) f.parentNode.removeChild(f); }, 9000);
+    }
+  }
+  function partySay(from, text) {
+    text = cleanText(String(text || '').trim()).slice(0, 120);
+    if (!text) return;
+    pchatAdd(from, text);
+    netSendAll({ t: 'pchat', from: from, text: text });
+  }
+  function sendPartyChat(text) {
+    text = String(text || '').trim();
+    if (!text || !netRole) return;
+    if (netRole === 'host') partySay(acctName || 'HOST', text);
+    else netSend({ t: 'pchat', text: text.slice(0, 120) });
+  }
+  function cleanText(t) { return typeof clean === 'function' ? clean(t) : t; }
+  function pchatVisible() {
+    var box = $('partyChat');
+    if (box) box.hidden = !(netRole === 'guest' || (netRole === 'host' && netGuests.length > 0));
   }
 
   // Public-match hooks; the accounts module fills these in when it loads.
@@ -6016,6 +6119,7 @@
       if (m.x) { for (var xk in m.x) m[xk] = m.x[xk]; }
       netQueue.push(m); if (netQueue.length > 30) netQueue.splice(0, netQueue.length - 30);
     }
+    else if (m.t === 'pchat') pchatAdd(m.from, m.text);
     else if (m.t === 'party') {
       partyList = m.names || []; partyRender();
       if (!netGuest && m.pick) netStatus('In the party. The host picked ' + m.pick + ' - waiting for them to start.');
@@ -6180,7 +6284,7 @@
         if (rm >= dz) guestStickAt = performance.now();
         if (rm >= dz + 0.1) aim = Math.atan2(ry, rx);
         else if (performance.now() - guestStickAt < 600) aim = player.ang;   // keep it where it was
-        var PB = [0, 1, 2, 3, 5, 6, 14, 15, 12];
+        var PB = [0, 1, 2, 3, 5, 6, 14, 15, 12, 13];
         for (i = 0; i < PB.length; i++) if (padHit(PB[i])) hitsNow |= 1 << (PB[i] === 15 ? 14 : (PB[i] === 12 ? 3 : PB[i]));
         if (padHit(9)) pause();
         if (padDown(4)) down |= 1 << 4;
