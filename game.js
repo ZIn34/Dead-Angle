@@ -1618,7 +1618,7 @@
     dmgMarks = []; shake = 0; promptItem = null;
     alive = MODE.field; matchTime = 0; shots = 0; hits = 0; kills = 0;
     score = [0, 0]; round = 1; roundBreak = 0; roundClock = 75;
-    result = null; overCause = ''; lastWinner = null;
+    result = null; overCause = ''; lastWinner = null; killcam = null;
 
     if (MODE.zone) {
       var span = Math.min(WORLD_W, WORLD_H);
@@ -2097,9 +2097,27 @@
   // stains that stay on the ground. The fallen leave a spreading pool; the
   // badly hurt leave drips behind them. The infected bleed a dark green.
   var drops = [], splats = [], SPLAT_MAX = 320, splatArt = null;
-  var BLOOD_RED = ['#6e0b10', '#8a1016', '#a3161c'], BLOOD_ZOMB = ['#2f4312', '#3f5a18', '#557522'];
+  var BLOOD_RED = ['#810322', '#a4072c', '#b80a33'], BLOOD_ZOMB = ['#27430b', '#355a0f', '#446f14'];
+  // the stain art: three splats side by side (red), and the same in green
+  var BLOOD_ART = { red: new Image(), zomb: new Image() }, bloodArtReady = 0, BLOOD_CELL_BLOB = 92;
+  BLOOD_ART.red.onload = BLOOD_ART.zomb.onload = function () { if (++bloodArtReady === 2) splatArt = null; };
+  BLOOD_ART.red.src = 'assets/blood_splat.png';
+  BLOOD_ART.zomb.src = 'assets/blood_splat_zomb.png';
   function bakeSplats() {
-    // a few irregular stain shapes, drawn once and stamped from then on
+    if (bloodArtReady === 2) {
+      // cut the drawn splats out of their sheets
+      splatArt = { red: [], zomb: [], drawn: true };
+      ['red', 'zomb'].forEach(function (k) {
+        var img = BLOOD_ART[k], cell = img.height;
+        for (var i = 0; i < 3; i++) {
+          var c = document.createElement('canvas'); c.width = c.height = cell;
+          c.getContext('2d').drawImage(img, i * cell, 0, cell, cell, 0, 0, cell, cell);
+          splatArt[k].push(c);
+        }
+      });
+      return;
+    }
+    // until the art arrives: a few simple stain shapes
     splatArt = { red: [], zomb: [] };
     [['red', BLOOD_RED], ['zomb', BLOOD_ZOMB]].forEach(function (pal) {
       for (var v = 0; v < 6; v++) {
@@ -2149,8 +2167,8 @@
       drops.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, z: rr(6, 14), vz: rr(20, 90),
                    sz: rr(1.3, big ? 3.6 : 2.8), pal: pal });
     }
-    addSplat(x + Math.cos(ang) * 4, y + Math.sin(ang) * 4, big ? 9 : rr(5, 8), pal, 'drop');
-    if (big) addSplat(x, y, 28 + rr(0, 8), pal, 'pool');
+    addSplat(x + Math.cos(ang) * 6, y + Math.sin(ang) * 6, big ? 14 : rr(8, 12), pal, 'drop');
+    if (big) addSplat(x, y, 40 + rr(0, 10), pal, 'pool');
   }
   function goreTick(dt) {
     var i;
@@ -2192,12 +2210,20 @@
       var r = p.r * (p.kind === 'pool' ? (0.25 + 0.75 * (1 - Math.pow(1 - grow, 2))) : (0.6 + 0.4 * grow));
       var a = p.t < 60 ? 0.92 : Math.max(0, 0.92 - (p.t - 60) / 90);
       if (a <= 0.02) continue;
-      var art = splatArt[p.pal][p.v];
+      var set = splatArt[p.pal], art = set[p.v % set.length];
       ctx.save();
       ctx.globalAlpha = a;
       ctx.translate(p.x, p.y); ctx.rotate(p.ang);
-      var sc = r / 26;
-      ctx.drawImage(art, -48 * sc, -48 * sc, 96 * sc, 96 * sc);
+      if (splatArt.drawn) {
+        // pixel art stays crisp; the big double splat is for pools only
+        if (p.kind === 'pool') art = set[2]; else art = set[p.v % 2];
+        ctx.imageSmoothingEnabled = false;
+        var sz = art.width * (r / BLOOD_CELL_BLOB);
+        ctx.drawImage(art, -sz / 2, -sz / 2, sz, sz);
+      } else {
+        var sc = r / 26;
+        ctx.drawImage(art, -48 * sc, -48 * sc, 96 * sc, 96 * sc);
+      }
       ctx.restore();
     }
   }
@@ -2540,6 +2566,12 @@
     dropKit(e);
     var killer = ents[fromId];
     var kn = killer ? killer.name : 'THE ZONE';
+    // you were killed by someone: the camera goes to them for a moment
+    if (e === player && killer && killer !== e && !splitOn && !netGuest && mode !== 'tut') {
+      var kw = curW(killer);
+      killcam = { k: killer, victim: e, t: 0, dur: 3.2, after: null,
+                  gun: kw ? kw.name : 'BARE HANDS', hp: Math.max(0, Math.round(killer.hp)), d: Math.round(dist(e, killer)) };
+    }
     if (killer && killer !== e) killer.kills++;
     if (killer && killer.local && killer !== e) {
       if (onHere(killer)) kills++;
@@ -2616,7 +2648,7 @@
 
     if (e.local) e.place = alive + 1;
     if (e.local && !anyLocalAlive()) {
-      finish(false, killer && killer !== e
+      finishAfterCam(e, false, killer && killer !== e
         ? kn + ' put ' + ((locals.length > 1) ? e.name : 'you') + ' down at ' + Math.round(dist(e, killer)) + ' units.'
         : 'The zone closed over ' + ((locals.length > 1) ? e.name : 'you') + '.', alive + 1);
     } else if (anyLocalAlive()) {
@@ -2667,6 +2699,22 @@
     if (MODE.teams || MODE.zombies) return e.team === player.team ? hostWon : !hostWon;
     if (!lastWinner) return false;
     return lastWinner === e || (squad > 1 && lastWinner.team === e.team);
+  }
+  var killcam = null;
+  function finishAfterCam(e, won, msg, place) {
+    if (killcam && killcam.victim === e) { killcam.after = [won, msg, place]; return; }
+    finish(won, msg, place);
+  }
+  function killcamTick(dt) {
+    if (!killcam) return;
+    killcam.t += dt;
+    // over when it has run, or the moment you are back on your feet
+    var done = killcam.t >= killcam.dur || (player.alive && killcam.t > 0.4);
+    if (!killcam.k.alive && killcam.t > 1.4) done = true;              // they died too
+    if (!done) return;
+    var aft = killcam.after;
+    killcam = null;
+    if (aft && state === 'play') finish(aft[0], aft[1], aft[2]);
   }
   function finish(won, msg, place) {
     cgGame('gameplayStop');
@@ -3603,6 +3651,7 @@
     }
 
     if (mode === 'tut') tutTick(dt);
+    killcamTick(dt);
     if (MODE.respawn) {
       for (i = 0; i < ents.length; i++) {
         e = ents[i];
@@ -3655,6 +3704,11 @@
     var lerp = 1 - Math.pow(0.0001, dt);
     for (var li = 0; li < locals.length; li++) {
       var L = locals[li], lc = L.cam || cam;
+      if (killcam && L === player) {
+        var kl = 1 - Math.pow(0.015, dt);
+        lc.x += (killcam.k.x - lc.x) * kl; lc.y += (killcam.k.y - lc.y) * kl;
+        continue;
+      }
       // The camera is pinned to you; only the look-ahead toward the cursor
       // eases in. A camera that trailed behind let you walk out from under
       // a still cursor and spun you round to face backwards.
@@ -4089,6 +4143,13 @@
       return window.EARSHOT.net();
     },
     queueTest: function () { goPublicHost(); },
+    // test: have entity `from` land a hit of `amount` on you
+    hurt: function (from, amount) {
+      var k = ents[from];
+      if (!k || !player) return false;
+      damage(player, amount, from, Math.atan2(player.y - k.y, player.x - k.x));
+      return { alive: player.alive, killcam: !!killcam };
+    },
     // poster art: draw one of the game's characters onto any canvas
     posterChar: function (c2, o) {
       if (!PACK_READY) return false;
@@ -4251,6 +4312,14 @@
     if (!splitOn) {
       VX = 0; VY = 0; VW = cw; VH = ch;
       player.viewX = 0; player.viewY = 0; player.viewW = cw; player.viewH = ch; player.zoom = zoom;
+      if (killcam) {
+        // see the world as the one who got you saw it
+        var me = player;
+        player = killcam.k; noOverlay = true;
+        try { renderScene(); } finally { player = me; noOverlay = false; }
+        renderKillcam();
+        return;
+      }
       renderScene();
       return;
     }
@@ -5084,6 +5153,51 @@
     ctx.restore();
   }
 
+  function renderKillcam() {
+    var kc = killcam, k = kc.k;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.save();
+    var ease = Math.min(1, kc.t / 0.35);
+    // letterbox bars and a red edge
+    var bar = Math.round(ch * 0.09 * ease);
+    ctx.fillStyle = '#05070b';
+    ctx.fillRect(0, 0, cw, bar); ctx.fillRect(0, ch - bar, cw, bar);
+    var vg = ctx.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.3, cw / 2, ch / 2, Math.max(cw, ch) * 0.7);
+    vg.addColorStop(0, 'rgba(120,0,20,0)'); vg.addColorStop(1, 'rgba(120,0,20,' + (0.35 * ease).toFixed(3) + ')');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, cw, ch);
+    // a ring around them
+    var sx = (k.x - cam.x) * zoom + cw / 2, sy = (k.y - cam.y) * zoom + ch / 2;
+    var pulse = 1 + Math.sin(kc.t * 7) * 0.08;
+    ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(sx, sy, 26 * zoom * pulse + 6, 0, 6.2832); ctx.stroke();
+    ctx.strokeStyle = '#ff4d5e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(sx, sy, 26 * zoom * pulse + 6, 0, 6.2832); ctx.stroke();
+    // who, with what
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var ty = bar + 44;
+    ctx.font = '500 11px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(241,231,208,.75)';
+    ctx.fillText('KILLED BY', cw / 2, ty - 22);
+    ctx.font = '400 30px "Russo One", "Chakra Petch", sans-serif';
+    ctx.lineJoin = 'round'; ctx.lineWidth = 6; ctx.strokeStyle = '#0d0f12';
+    ctx.strokeText(k.name, cw / 2, ty + 6);
+    ctx.fillStyle = '#ff5a68';
+    ctx.fillText(k.name, cw / 2, ty + 6);
+    ctx.font = '600 12px "IBM Plex Mono", monospace';
+    var line = kc.gun + '  \u00b7  ' + kc.d + 'u AWAY  \u00b7  ' + kc.hp + ' HP LEFT';
+    ctx.lineWidth = 4; ctx.strokeText(line, cw / 2, ty + 36);
+    ctx.fillStyle = '#f1e7d0'; ctx.fillText(line, cw / 2, ty + 36);
+    // what happens next
+    var nxt = kc.after ? 'RESULTS IN ' + Math.max(1, Math.ceil(kc.dur - kc.t))
+            : (player.respawnT > 0 ? 'RESPAWN IN ' + Math.ceil(player.respawnT) : '');
+    if (nxt) {
+      ctx.font = '500 11px "IBM Plex Mono", monospace';
+      ctx.fillStyle = 'rgba(241,231,208,.7)';
+      ctx.fillText(nxt, cw / 2, ch - bar - 22);
+    }
+    ctx.restore();
+  }
+
   function renderDropHint() {
     renderFlagHint();
     if (!player.alive || !player.air) return;
@@ -5818,6 +5932,7 @@
 
   function goHome() {
     cgGame('gameplayStop');
+    killcam = null;
     netGuest = false; netGuestPaused = false;
     if (tutRestore) { mode = tutRestore.mode; mapKind = tutRestore.mapKind; blackout = tutRestore.blackout; squad = tutRestore.squad; tutRestore = null; MODE = MODES[mode]; }
     setTimeout(syncMenu, 0);
