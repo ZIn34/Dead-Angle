@@ -5422,6 +5422,10 @@
     kbmLast = performance.now();
     var k = e.key.toLowerCase();
     keys[k] = true;
+    // number keys by position, so Shift (sprint) held down does not turn
+    // 1 and 2 into ! and @
+    if (e.code === 'Digit1' || e.code === 'Numpad1') k = '1';
+    else if (e.code === 'Digit2' || e.code === 'Numpad2') k = '2';
     if (netRole && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden) { e.preventDefault(); openIgChat(); return; }
     if (netGuest && state === 'play') {
       var GB = { 'e': 0, ' ': 0, 'v': 1, 'x': 1, 'r': 2, 'f': 3, 'h': 5, 'g': 6, 'q': 14, '1': 14, '2': 14, 'z': 13 };
