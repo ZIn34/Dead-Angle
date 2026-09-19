@@ -2948,6 +2948,9 @@
     // Face the right stick if it is pushed; otherwise where you are walking on
     // a pad; otherwise the cursor. Never left pointing at nothing.
     var rx = I.pad ? I.ax(2) : 0, ry = I.pad ? I.ax(3) : 0;
+    // A stick springing back to centre passes through tiny readings that
+    // point anywhere; only a clear push changes where you aim.
+    if (!I.net && rx * rx + ry * ry < 0.09) { rx = 0; ry = 0; }
     if (rx || ry) {
       e.stickAimAt = performance.now();
       e.ang = I.net ? Math.atan2(ry, rx) : aimAssist(e, Math.atan2(ry, rx));
@@ -4821,7 +4824,7 @@
     if (!c || c.any) return padActive();
     if (c.pad < 0) return false;
     if (!c.kb) return true;
-    return (e.padLast || -1e9) > kbmLast && (performance.now() - (e.padLast || -1e9)) < 10000;
+    return (e.padLast || -1e9) > kbmLast;
   }
 
   var pad = null, padPrev = {}, padSeen = false, padLast = -1e9;
@@ -4846,7 +4849,7 @@
     if (padBusy(pad)) padLast = performance.now();
   }
   function padActive() {
-    return !!pad && padLast > kbmLast && (performance.now() - padLast) < 10000;
+    return !!pad && padLast > kbmLast;
   }
   // Prompts read as whatever you are actually holding.
   function promptKey(keyLabel, padLabel) { return usingPad(player) ? padLabel : keyLabel; }
@@ -4866,19 +4869,21 @@
   }
 
   // Nudge the aim toward whoever is closest to where you are already pointing.
+  // A gentle pull toward someone you can actually see, close to where you are
+  // already aiming. Never toward anyone hidden in the dark, and never a snap.
   function aimAssist(e, ang) {
     if (!SET.assist) return ang;
-    var best = ang, bestOff = 0.26;
+    var best = null, bestOff = 0.17;
     for (var i = 0; i < ents.length; i++) {
       var o = ents[i];
-      if (o === e || !o.alive || !foes(e, o)) continue;
+      if (o === e || !o.alive || o.air || !foes(e, o)) continue;
       var d = dist(e, o);
-      if (d > 460 || !sightClear(e.x, e.y, o.x, o.y)) continue;
+      if (d > Math.min(460, VIEW_R) || !sightClear(e.x, e.y, o.x, o.y)) continue;
       var want = Math.atan2(o.y - e.y, o.x - e.x);
-      var off = Math.abs(((want - ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-      if (off < bestOff) { bestOff = off; best = want; }
+      var off = ((want - ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      if (Math.abs(off) < bestOff) { bestOff = Math.abs(off); best = off; }
     }
-    return best;
+    return best === null ? ang : ang + best * 0.45;
   }
 
   // ---- driving the screens with a pad ------------------------------------
@@ -5741,7 +5746,7 @@
       if (pad) {
         mx = padAxis(0); my = padAxis(1);
         var rx = padAxis(2), ry = padAxis(3);
-        if (rx || ry) aim = Math.atan2(ry, rx);
+        if (rx * rx + ry * ry >= 0.09) aim = Math.atan2(ry, rx);
         var PB = [0, 1, 2, 3, 5, 6, 14, 15, 12];
         for (i = 0; i < PB.length; i++) if (padHit(PB[i])) hitsNow |= 1 << (PB[i] === 15 ? 14 : (PB[i] === 12 ? 3 : PB[i]));
         if (padHit(9)) pause();
