@@ -322,6 +322,36 @@ h1 .gold{color:var(--gold)}
         <button class="go" id="netHost" type="button">HOST A PARTY</button>
         <div class="netcode" id="netCodeBox" hidden>PARTY CODE<b id="netCode">-----</b></div>
         <div class="plist" id="partyList" hidden></div>
+        <div class="picks" id="partyPick" hidden>
+          <div class="pick">
+            <p>MODE</p>
+            <div class="row" id="partyModeRow">
+              <button type="button" data-m="br">BATTLE ROYALE</button>
+              <button type="button" data-m="team">TEAMS 5V5</button>
+              <button type="button" data-m="war">WAR 10V10</button>
+              <button type="button" data-m="ctf">CAPTURE THE FLAG</button>
+              <button type="button" data-m="sect">SECTORS</button>
+              <button type="button" data-m="zomb">INFECTION</button>
+              <button type="button" data-m="duel">1V1</button>
+              <button type="button" data-m="gun">GUN GAME</button>
+            </div>
+          </div>
+          <div class="pick" id="partyMapPick">
+            <p>MAP</p>
+            <div class="row" id="partyMapRow">
+              <button type="button" data-p="cqb">CQB</button>
+              <button type="button" data-p="world">WORLD</button>
+            </div>
+          </div>
+          <div class="pick" id="partySquadPick">
+            <p>SQUAD</p>
+            <div class="row" id="partySquadRow">
+              <button type="button" data-s="1">SOLO - RIVALS</button>
+              <button type="button" data-s="2">DUOS - PARTNERS</button>
+            </div>
+          </div>
+          <button class="go" id="partyStart" type="button">START MATCH</button>
+        </div>
         <div class="joinrow">
           <input id="netJoinCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" aria-label="Party code">
           <button class="go ghost" id="netJoin" type="button">JOIN</button>

@@ -5468,6 +5468,20 @@
     pressRow(this, 'data-l', blackout ? 'black' : 'normal');
     syncMenu();
   });
+  function partyPickRow(rowId, menuRowId, attr, apply) {
+    $(rowId).addEventListener('click', function (ev) {
+      var b = ev.target.closest('button');
+      if (!b) return;
+      apply(b.getAttribute(attr));
+      $(menuRowId).querySelector('[' + attr + '="' + b.getAttribute(attr) + '"]').click();   // keep the menu in step
+      partyRender();
+      partyBroadcast();
+    });
+  }
+  partyPickRow('partyModeRow', 'modeRow', 'data-m', function (v) { mode = v; });
+  partyPickRow('partyMapRow', 'mapRow', 'data-p', function (v) { mapKind = v; });
+  partyPickRow('partySquadRow', 'squadRow', 'data-s', function (v) { squad = parseInt(v, 10); });
+  $('partyStart').addEventListener('click', function () { startMatch(); });
   $('modeRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
     if (!b) return;
@@ -5918,7 +5932,10 @@
     for (var i = 0; i < netGuests.length; i++) if (netGuests[i].party) n.push(netGuests[i].name);
     return n;
   }
-  function partyBroadcast() { if (netRole === 'host') netSendAll({ t: 'party', names: partyNames(), code: netCode }); }
+  function partyBroadcast() {
+    if (netRole === 'host') netSendAll({ t: 'party', names: partyNames(), code: netCode,
+      pick: MODE_LABEL[mode] + (mode !== 'duel' ? ' \u00b7 ' + mapKind.toUpperCase() : '') + (MODES[mode].teams ? '' : (squad > 1 ? ' \u00b7 DUOS' : ' \u00b7 SOLO')) });
+  }
   var partyList = [];
   function partyRender() {
     var el = $('partyList');
@@ -5932,6 +5949,16 @@
       el.appendChild(d);
     });
     el.hidden = !names.length;
+    // the host picks the match right here once anyone has joined
+    var pp = $('partyPick');
+    if (pp) {
+      pp.hidden = !(netRole === 'host' && netGuests.length > 0);
+      pressRow($('partyModeRow'), 'data-m', mode);
+      pressRow($('partyMapRow'), 'data-p', mapKind);
+      pressRow($('partySquadRow'), 'data-s', String(squad));
+      $('partyMapPick').hidden = mode === 'duel';
+      $('partySquadPick').hidden = !!MODES[mode].teams;
+    }
   }
 
   // Public-match hooks; the accounts module fills these in when it loads.
@@ -5987,7 +6014,10 @@
       if (m.x) { for (var xk in m.x) m[xk] = m.x[xk]; }
       netQueue.push(m); if (netQueue.length > 30) netQueue.splice(0, netQueue.length - 30);
     }
-    else if (m.t === 'party') { partyList = m.names || []; partyRender(); }
+    else if (m.t === 'party') {
+      partyList = m.names || []; partyRender();
+      if (!netGuest && m.pick) netStatus('In the party. The host picked ' + m.pick + ' - waiting for them to start.');
+    }
     else if (m.t === 'wait') netStatus(m.why);
     else if (m.t === 'queue') netStatus(m.msg);
     else if (m.t === 'full') { netClose('That match is full.'); if (quickFail) quickFail(); }
