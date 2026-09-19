@@ -2547,6 +2547,7 @@
         bleed(e.x, e.y, e.lastHitAng, 30, false, bloodOf(e));
         emit(e.x, e.y, MOVE_SND.hit, e.id, 'hit');
         var dn = ents[fromId];
+        e.downedBy = fromId;                      // who gets the kill cam if they bleed out
         if (e === player) feed('<b>DOWNED</b> - hold on for a teammate', true);
         else if (e.team === player.team) feed('<b>' + e.name + '</b> is down', true);
         else if (dn === player) feed('<b>YOU</b> downed ' + e.name, true);
@@ -2566,11 +2567,21 @@
     dropKit(e);
     var killer = ents[fromId];
     var kn = killer ? killer.name : 'THE ZONE';
+    // who the kill cam shows: whoever finished you, or whoever put you down
+    // if you bled out or gave up
+    var kcK = (killer && killer !== e) ? killer : (e.downedBy >= 0 ? ents[e.downedBy] : null);
+    if (kcK && (!kcK.alive || kcK === e)) kcK = null;
+    e.downedBy = -1;
+    // a friend online was killed: their game plays its own kill cam
+    if (e.ctl && e.ctl.net && kcK && netRole === 'host' && netHostLive()) {
+      var kgw = curW(kcK);
+      netEv.push(['c', e.id, kcK.id, kgw ? kgw.name : 'BARE HANDS', Math.max(0, Math.round(kcK.hp)), Math.round(dist(e, kcK))]);
+    }
     // you were killed by someone: the camera goes to them for a moment
-    if (e === player && killer && killer !== e && !splitOn && !netGuest && mode !== 'tut') {
-      var kw = curW(killer);
-      killcam = { k: killer, victim: e, t: 0, dur: 3.2, after: null,
-                  gun: kw ? kw.name : 'BARE HANDS', hp: Math.max(0, Math.round(killer.hp)), d: Math.round(dist(e, killer)) };
+    if (e === player && kcK && !splitOn && !netGuest && mode !== 'tut') {
+      var kw = curW(kcK);
+      killcam = { k: kcK, victim: e, t: 0, dur: 3.2, after: null,
+                  gun: kw ? kw.name : 'BARE HANDS', hp: Math.max(0, Math.round(kcK.hp)), d: Math.round(dist(e, kcK)) };
     }
     if (killer && killer !== e) killer.kills++;
     if (killer && killer.local && killer !== e) {
@@ -3636,7 +3647,7 @@
       if (medic) {
         e.revT += dt;
         if (e.revT >= 2.6) {
-          e.down = false; e.revT = 0; e.downT = 0;
+          e.down = false; e.revT = 0; e.downT = 0; e.downedBy = -1;
           e.hp = 50;
           if (e === player) feed('<b>BACK UP</b> - ' + medic.name + ' got you', true);
           else if (e.team === player.team) feed('<b>' + e.name + '</b> is back up', true);
@@ -4144,11 +4155,11 @@
     },
     queueTest: function () { goPublicHost(); },
     // test: have entity `from` land a hit of `amount` on you
-    hurt: function (from, amount) {
-      var k = ents[from];
-      if (!k || !player) return false;
-      damage(player, amount, from, Math.atan2(player.y - k.y, player.x - k.x));
-      return { alive: player.alive, killcam: !!killcam };
+    hurt: function (from, amount, victim) {
+      var k = ents[from], v = victim === undefined ? player : ents[victim];
+      if (!k || !v) return false;
+      damage(v, amount, from, Math.atan2(v.y - k.y, v.x - k.x));
+      return { alive: v.alive, killcam: !!killcam };
     },
     // poster art: draw one of the game's characters onto any canvas
     posterChar: function (c2, o) {
@@ -6488,7 +6499,7 @@
     decals = []; impacts = []; deaths = []; nades = []; flags = []; smokes = []; sectors = [];
     drops = []; splats = [];
     dmgMarks = []; shake = 0; promptItem = null; zone = null; plane = null;
-    locals = []; splitOn = false; player = null; guestYou = m.you; netQueue = [];
+    locals = []; splitOn = false; player = null; guestYou = m.you; netQueue = []; killcam = null;
     kills = 0; shots = 0; hits = 0; matchTime = 0; score = [0, 0]; result = null;
     charCache = {};
     elFeed.innerHTML = '';
@@ -6577,6 +6588,9 @@
       else if (q[0] === 'a') { if (netDefs[q[3]]) audioEmit(q[1], q[2], netDefs[q[3]], q[4]); }
       else if (q[0] === 'f') feed(q[1], q[2]);
       else if (q[0] === 'g') bleed(q[1], q[2], q[3], q[4], !!q[5], q[6]);
+      else if (q[0] === 'c' && q[1] === guestYou && ents[q[2]]) {
+        killcam = { k: ents[q[2]], victim: player, t: 0, dur: 3.2, after: null, gun: q[3], hp: q[4], d: q[5] };
+      }
     }
   }
 
@@ -6615,7 +6629,13 @@
     }
     player.leadX = (player.leadX || 0) + (glx - (player.leadX || 0)) * lerp;
     player.leadY = (player.leadY || 0) + (gly - (player.leadY || 0)) * lerp;
-    cam.x = player.x + player.leadX; cam.y = player.y + player.leadY;
+    killcamTick(dt);
+    if (killcam) {
+      var gk = 1 - Math.pow(0.015, dt);
+      cam.x += (killcam.k.x - cam.x) * gk; cam.y += (killcam.k.y - cam.y) * gk;
+    } else {
+      cam.x = player.x + player.leadX; cam.y = player.y + player.leadY;
+    }
     syncHud();
 
     // controls out, as a virtual pad
