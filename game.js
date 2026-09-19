@@ -30,10 +30,10 @@
   // aud: how the shot is synthesised. rate/cut/hp shape the crack, body is the
   // low thump under it, vol is loudness at the muzzle.
   var WEAPONS = {
-    pistol:   { name: 'PISTOL',   dmg: 18, pellets: 1, interval: 0.22,  mag: 12, spread: 0.035, reload: 1.10, speed: 1150, tint: '#ffc95e', snd: { maxR: 900,  speed: 980,  color: '255,201,94',  w: 2.0, aud: { rate: 1.00, cut: 3200, hp: 220, decay: 0.17, body: 150, vol: 0.50 } } },
-    shotgun:  { name: 'SHOTGUN',  dmg: 11, pellets: 7, interval: 0.78,  mag: 6,  spread: 0.155, reload: 2.00, speed: 980,  tint: '#ff7a4d', snd: { maxR: 1700, speed: 1040, color: '255,122,77',  w: 3.0, aud: { rate: 0.68, cut: 2100, hp: 90,  decay: 0.36, body: 78,  vol: 0.85 } } },
-    rifle:    { name: 'SNIPER',   dmg: 38, pellets: 1, interval: 0.58,  mag: 8,  spread: 0.012, reload: 1.80, speed: 1500, tint: '#fff5cd', snd: { maxR: 2000, speed: 1080, color: '255,245,205', w: 2.6, aud: { rate: 0.85, cut: 4400, hp: 150, decay: 0.44, body: 104, vol: 0.92 } } },
-    silenced: { name: 'RIFLE',    dmg: 16, pellets: 1, interval: 0.115,  mag: 30, spread: 0.030, reload: 1.20, speed: 1050, tint: '#9db0c4', snd: { maxR: 540,  speed: 760,  color: '157,176,196', w: 1.8, aud: { rate: 1.55, cut: 1900, hp: 380, decay: 0.10, body: 96,  vol: 0.58 } } }
+    pistol:   { name: 'PISTOL',   semi: true, tap: 0.075, dmg: 36, pellets: 1, interval: 0.22,  mag: 12, spread: 0.035, reload: 1.10, speed: 1150, tint: '#ffc95e', snd: { maxR: 900,  speed: 980,  color: '255,201,94',  w: 2.0, aud: { rate: 1.00, cut: 3200, hp: 220, decay: 0.17, body: 150, vol: 0.50 } } },
+    shotgun:  { name: 'SHOTGUN',  dmg: 22, pellets: 7, interval: 0.78,  mag: 6,  spread: 0.155, reload: 2.00, speed: 980,  tint: '#ff7a4d', snd: { maxR: 1700, speed: 1040, color: '255,122,77',  w: 3.0, aud: { rate: 0.68, cut: 2100, hp: 90,  decay: 0.36, body: 78,  vol: 0.85 } } },
+    rifle:    { name: 'SNIPER',   dmg: 76, pellets: 1, interval: 0.58,  mag: 8,  spread: 0.012, reload: 1.80, speed: 1500, tint: '#fff5cd', snd: { maxR: 2000, speed: 1080, color: '255,245,205', w: 2.6, aud: { rate: 0.85, cut: 4400, hp: 150, decay: 0.44, body: 104, vol: 0.92 } } },
+    silenced: { name: 'RIFLE',    dmg: 32, pellets: 1, interval: 0.115,  mag: 30, spread: 0.030, reload: 1.20, speed: 1050, tint: '#9db0c4', snd: { maxR: 540,  speed: 760,  color: '157,176,196', w: 1.8, aud: { rate: 1.55, cut: 1900, hp: 380, decay: 0.10, body: 96,  vol: 0.58 } } }
   };
   var WEAPON_KEYS = ['pistol', 'shotgun', 'rifle', 'silenced'];
   var WEAPON_WEIGHT = [32, 22, 20, 26];
@@ -567,11 +567,23 @@
     return lineClear(ax, ay, bx, by) && !smokeBlocks(ax, ay, bx, by);
   }
 
+  // You see what is in front of you, plus a little circle right around you
+  // (you would feel someone at your back). Bots get the same eyes.
+  var FOV_HALF = 0.96, NEAR_SEE = 60;
+  function inCone(e, x, y, half) {
+    var dx = x - e.x, dy = y - e.y;
+    if (dx * dx + dy * dy <= NEAR_SEE * NEAR_SEE) return true;
+    var d = Math.atan2(dy, dx) - e.ang;
+    d = ((d + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    return Math.abs(d) <= (half || FOV_HALF);
+  }
   function visibleToPlayer(x, y) {
+    if (!inCone(player, x, y)) return false;
     var dx = x - player.x, dy = y - player.y;
     return dx * dx + dy * dy < VIEW_R * VIEW_R && sightClear(player.x, player.y, x, y);
   }
   function litVisible(x, y, reach) {
+    if (!inCone(player, x, y)) return false;
     var dx = x - player.x, dy = y - player.y;
     return dx * dx + dy * dy < reach * reach && sightClear(player.x, player.y, x, y);
   }
@@ -1579,7 +1591,7 @@
     e.x = tile.x * TILE + TILE / 2; e.y = tile.y * TILE + TILE / 2;
     e.px = e.x; e.py = e.y; e.vx = 0; e.vy = 0;
     e.hp = (MODE.zombies && e.team === 1) ? 38 : 100;
-    e.alive = true; e.respawnT = 0;
+    e.alive = true; e.respawnT = 0; e.bleeding = false;
     e.fireT = 0; e.reloadT = 0; e.useT = 0; e.stepT = 0;
     e.down = false; e.downT = 0; e.revT = 0;
     e.target = null; e.path = null; e.pathI = 0; e.repathT = 0;
@@ -1757,7 +1769,7 @@
       e.x = plane.x; e.y = plane.y;
       if (!e.bot) continue;
       if (teamAt[e.team] === undefined) teamAt[e.team] = rr(0.1, 0.9) * plane.dur;
-      e.dropAt = teamAt[e.team] + rr(0, 0.4);
+      e.dropAt = Math.max(JUMP_AFTER + rr(0, 1.5), teamAt[e.team] + rr(0, 0.4));
       e.follow = false;
       for (var j = 0; j < locals.length; j++) if (locals[j].team === e.team) e.follow = true;
     }
@@ -1814,6 +1826,7 @@
     var k = Math.min(plane.t, plane.dur) * PLANE_SPEED;
     plane.x = plane.x0 + plane.dx * k; plane.y = plane.y0 + plane.dy * k;
     var inWorld = plane.x > TILE * 2 && plane.y > TILE * 2 && plane.x < WORLD_W - TILE * 2 && plane.y < WORLD_H - TILE * 2;
+    plane.overLand = inWorld;
     var riders = 0;
     for (var i = 0; i < ents.length; i++) {
       var e = ents[i];
@@ -1851,11 +1864,14 @@
   }
 
   // Your own hands in the air: jump from the plane, then steer the chute.
+  // the door opens a few seconds in, once the plane is over the island
+  var JUMP_AFTER = 5;
+  function jumpOpen() { return !!plane && plane.t >= JUMP_AFTER && !!plane.overLand; }
   function airControl(e, I, dt) {
     if (e.air === 'plane') {
-      if (I.pad && I.hit(0)) jumpOut(e);
-      if (I.kb && e.jumpReq) jumpOut(e);
+      var go = (I.pad && I.hit(0)) || (I.kb && e.jumpReq);
       e.jumpReq = false;
+      if (go && jumpOpen()) jumpOut(e);
       return;
     }
     var ix = 0, iy = 0;
@@ -2191,7 +2207,7 @@
     // the badly hurt leave a trail
     for (i = 0; i < ents.length; i++) {
       var e = ents[i];
-      if (!e.alive || e.air || e.hp >= 40 || !e.moving) continue;
+      if (!e.alive || e.air || !(e.bleeding || (e.hp < 40 && e.moving))) continue;
       e.dripT = (e.dripT || 0) - dt;
       if (e.dripT <= 0) {
         e.dripT = rr(0.18, 0.4) * (0.5 + e.hp / 80);
@@ -2267,7 +2283,8 @@
       // each shot kicks the hand off line; long bursts spray
       if (e.aimOff !== undefined) e.aimOff += rr(-1, 1) * (w.interval < 0.2 ? 0.05 : 0.025);
     }
-    e.fireT = w.interval * (e.bot ? DIFF[difficulty].rate : 1);
+    // a semi-auto only waits a moment between clicks (bots keep their pace)
+    e.fireT = e.bot ? w.interval * DIFF[difficulty].rate : (w.semi ? w.tap : w.interval);
     e.animFire = 0.17;
     var fdur = blackout ? 0.16 : (FX.flash ? FX.flash.frames / FX.flash.fps : 0.075);
     var fscale = w.pellets > 1 ? 1.35 : (w.interval > 0.4 ? 1.4 : (w.snd.maxR < 400 ? 0.5 : 1));
@@ -2508,6 +2525,11 @@
     if (godMode && e === player) return;
     e.hp -= amount;
     e.useT = 0;
+    // shot down to half or worse: bleeding until a stim closes it up
+    if (e.hp > 0 && e.hp <= 50 && !isZombie(e) && hitBy && hitBy !== e && !e.down) {
+      if (!e.bleeding && e.local) feed('<b>BLEEDING</b> - use a stim', true);
+      e.bleeding = true; e.bleedBy = fromId;
+    }
     if (e.bot) { e.flinch = 0.35; if (e.aimOff !== undefined) e.aimOff += rr(-0.06, 0.06); }
     bleed(e.x, e.y, ang, amount, false, bloodOf(e));
     e.lastHitAng = ang;
@@ -2547,7 +2569,7 @@
         if (m !== e && m.alive && !m.down && m.team === e.team) { helper = true; break; }
       }
       if (helper) {
-        e.down = true; e.downT = 22; e.revT = 0;
+        e.down = true; e.downT = 22; e.revT = 0; e.bleeding = false;
         e.hp = 24;
         e.target = null; e.path = null; e.reloadT = 0; e.useT = 0;
         bleed(e.x, e.y, e.lastHitAng, 30, false, bloodOf(e));
@@ -2834,7 +2856,7 @@
     // the storm
     if (e.useT > 0) {
       e.useT -= dt;
-      if (e.useT <= 0) e.hp = Math.min(100, e.hp + 45);
+      if (e.useT <= 0) { e.hp = Math.min(100, e.hp + 45); e.bleeding = false; }
     }
 
     // --- senses
@@ -2858,6 +2880,7 @@
           if (!(cw3 && cw3.snd.maxR >= 1900)) reach2 = sightR * 0.62;
         }
         if (d >= reach2 || !sightClear(e.x, e.y, o.x, o.y)) continue;
+        if (o !== e.target && !inCone(e, o.x, o.y, FOV_HALF + 0.15)) continue;
         if (mode === 'br' && o !== e.target) {
           if ((e.skip[o.id] || 0) > matchTime) continue;          // already let them go
           if (e.skip[o.id] === undefined || e.skip[o.id] <= matchTime) {
@@ -3362,7 +3385,7 @@
 
     if (e.useT > 0) {
       e.useT -= dt;
-      if (e.useT <= 0) e.hp = Math.min(100, e.hp + 45);
+      if (e.useT <= 0) { e.hp = Math.min(100, e.hp + 45); e.bleeding = false; }
     }
 
     var ix = 0, iy = 0;
@@ -3439,6 +3462,12 @@
     }
     var firing = (I.kb && mouse.down) || (!!I.pad && I.down(7)) ||
       (I.touch && sticks.aim && Math.abs(sticks.aim.x - sticks.aim.ox) + Math.abs(sticks.aim.y - sticks.aim.oy) > 26);
+    // semi-auto: a shot per press, not per held frame (a friend's quick click
+    // arrives as a button press, so it is never lost between messages)
+    var semiW = curW(e) && curW(e).semi;
+    var pressed = I.net ? (I.hit(7) || (firing && !e.trigHeld)) : (firing && !e.trigHeld);
+    e.trigHeld = firing;
+    if (semiW && !pressed) firing = false;
     if (firing) {
       var cw2 = curW(e), cs2 = curSlot(e);
       if (!cw2 || (cs2.ammo <= 0 && e.reserve <= 0)) melee(e);   // nothing to shoot with
@@ -3663,7 +3692,7 @@
       if (medic) {
         e.revT += dt;
         if (e.revT >= 2.6) {
-          e.down = false; e.revT = 0; e.downT = 0; e.downedBy = -1;
+          e.down = false; e.revT = 0; e.downT = 0; e.downedBy = -1; e.bleeding = false;
           e.hp = 50;
           if (e === player) feed('<b>BACK UP</b> - ' + medic.name + ' got you', true);
           else if (e.team === player.team) feed('<b>' + e.name + '</b> is back up', true);
@@ -3677,6 +3706,13 @@
       }
     }
 
+    for (i = 0; i < ents.length; i++) {
+      var bl = ents[i];
+      if (!bl.alive || !bl.bleeding || bl.down || bl.air) continue;
+      if (godMode && bl === player) continue;
+      bl.hp -= 5 * dt;
+      if (bl.hp <= 0) { bl.hp = 0; bl.bleeding = false; hitCause = 'bleed'; kill(bl, ents[bl.bleedBy] && ents[bl.bleedBy] !== bl ? bl.bleedBy : -1); hitCause = 'gun'; }
+    }
     if (mode === 'tut') tutTick(dt);
     killcamTick(dt);
     if (MODE.respawn) {
@@ -4504,6 +4540,13 @@
     }
     poly.closePath();
     ctx.clip(poly);
+    var cone = new Path2D(), cR = VIEW_R + TILE * 3;
+    cone.moveTo(player.x, player.y);
+    cone.arc(player.x, player.y, cR, player.ang - FOV_HALF, player.ang + FOV_HALF);
+    cone.closePath();
+    cone.moveTo(player.x + NEAR_SEE, player.y);
+    cone.arc(player.x, player.y, NEAR_SEE, 0, 6.2832);
+    ctx.clip(cone);
 
     if (packed) {
       tilePass(r0, r1, t0, t1, false, false, 0, floorPat || '#24313f');
@@ -5243,9 +5286,14 @@
     if (!player.alive || !player.air) return;
     var txt, sub2 = null;
     if (player.air === 'plane') {
-      txt = promptKey('SPACE', 'A') + '  JUMP';
       var left = Math.max(0, plane.dur * 0.93 - plane.t);
-      sub2 = 'THE PLANE DROPS EVERYONE IN ' + Math.ceil(left) + 's';
+      if (jumpOpen()) {
+        txt = promptKey('SPACE', 'A') + '  JUMP';
+        sub2 = 'THE PLANE DROPS EVERYONE IN ' + Math.ceil(left) + 's';
+      } else {
+        txt = 'DOOR OPENS IN ' + Math.max(1, Math.ceil(JUMP_AFTER - plane.t));
+        sub2 = 'Pick your spot on the map';
+      }
     } else {
       txt = 'STEER YOUR LANDING';
       sub2 = promptKey('WASD', 'LEFT STICK');
@@ -5376,6 +5424,20 @@
 
   function renderDamage() {
     if (noOverlay) return;
+    if (player.alive && player.bleeding && !player.down) {
+      // a pulsing red edge and a reminder of the fix
+      var bp = 0.18 + 0.12 * Math.sin(performance.now() / 180);
+      var bg = ctx.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.25, cw / 2, ch / 2, Math.max(cw, ch) * 0.6);
+      bg.addColorStop(0, 'rgba(160,0,20,0)'); bg.addColorStop(1, 'rgba(160,0,20,' + bp.toFixed(3) + ')');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, cw, ch);
+      ctx.save();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = '400 15px "Russo One", "Chakra Petch", sans-serif';
+      var bt = 'BLEEDING  \u00b7  ' + promptKey('F', 'Y') + ' TO USE A STIM' + (player.meds ? '' : ' (NONE - FIND ONE)');
+      ctx.lineWidth = 4; ctx.strokeStyle = '#0d0f12'; ctx.strokeText(bt, cw / 2, ch * 0.78);
+      ctx.fillStyle = '#ff5a68'; ctx.fillText(bt, cw / 2, ch * 0.78);
+      ctx.restore();
+    }
     for (var i = 0; i < dmgMarks.length; i++) {
       var m = dmgMarks[i];
       if (m.who !== undefined && m.who !== player.id) continue;
@@ -6070,7 +6132,7 @@
   // ---------------------------------------------------------------- online
   var PEER_JS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
   var netEv = [], netDefs = [], netSendT = 0, netSigs = {}, guestHits = 0, netInT = 0;
-  var netQueue = [], guestYou = -1, netLastIn = '', quickFail = null, guestStickAt = -1e9;
+  var netQueue = [], guestYou = -1, netLastIn = '', quickFail = null, guestStickAt = -1e9, guestTrig = false;
   var netStat = { sent: 0, recv: 0, err: '' };
   var WKEYS = Object.keys(WEAPONS);
 
@@ -6284,7 +6346,7 @@
   function packEnt(e) {
     var s0 = e.slots[0], s1 = e.slots[1];
     var bits = (e.alive ? 1 : 0) | (e.down ? 2 : 0) | (e.moving ? 4 : 0) |
-               (e.air === 'plane' ? 8 : 0) | (e.air === 'chute' ? 16 : 0) | (e.bot ? 32 : 0);
+               (e.air === 'plane' ? 8 : 0) | (e.air === 'chute' ? 16 : 0) | (e.bot ? 32 : 0) | (e.bleeding ? 64 : 0);
     return [e.id, e.x, e.y, e.ang, e.team, e.skin, bits, e.animT || 0, e.animFire || 0, e.swingT || 0,
             e.throwT || 0, e.meleeT || 0, Math.round(e.hp), e.revT || 0, e.downT || 0, e.respawnT || 0,
             e.level || 0, e.airT || 0, e.name, e.slot,
@@ -6575,7 +6637,7 @@
     e.ang = a[3]; e.team = a[4]; e.skin = a[5];
     var bits = a[6];
     e.alive = !!(bits & 1); e.down = !!(bits & 2); e.moving = !!(bits & 4);
-    e.air = (bits & 8) ? 'plane' : ((bits & 16) ? 'chute' : null); e.bot = !!(bits & 32);
+    e.air = (bits & 8) ? 'plane' : ((bits & 16) ? 'chute' : null); e.bot = !!(bits & 32); e.bleeding = !!(bits & 64);
     e.animT = a[7]; e.animFire = a[8]; e.swingT = a[9]; e.throwT = a[10]; e.meleeT = a[11];
     e.hp = a[12]; e.revT = a[13]; e.downT = a[14]; e.respawnT = a[15]; e.level = a[16]; e.airT = a[17];
     e.name = a[18]; e.slot = a[19];
@@ -6692,6 +6754,8 @@
       if (aim === null && !padActive()) aim = Math.atan2(mouse.wy - player.y, mouse.wx - player.x);
       if (keys['shift']) down |= 1 << 4;
       if (mouse.down) down |= 1 << 7;
+      if ((down & (1 << 7)) && !guestTrig) hitsNow |= 1 << 7;
+      guestTrig = !!(down & (1 << 7));
     } else if (pad && padHit(9)) resume();
     if (aim === null) aim = player.ang;
     netInT -= dt;
