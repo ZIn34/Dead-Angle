@@ -1807,7 +1807,6 @@
       ix /= Math.max(1, l); iy /= Math.max(1, l);
       e.x = clamp(e.x + ix * GLIDE_SPEED * dt, TILE * 2, WORLD_W - TILE * 2);
       e.y = clamp(e.y + iy * GLIDE_SPEED * dt, TILE * 2, WORLD_H - TILE * 2);
-      e.ang = Math.atan2(iy, ix);
     }
     if (I.kb && mouse.sx !== undefined && !I.padOn) e.ang = Math.atan2(mouse.wy - e.y, mouse.wx - e.x);
   }
@@ -2974,9 +2973,8 @@
     } else if (I.kb && mouse.sx !== undefined && !I.padOn) {
       // on keyboard and mouse you always face the cursor, whatever you walk
       e.ang = Math.atan2(mouse.wy - e.y, mouse.wx - e.x);
-    } else if (I.padOn && (ix || iy)) {
-      e.ang = Math.atan2(iy, ix);
     }
+    // walking never turns you: on a pad only the right stick aims
 
     e.fireT -= dt;
     if (e.reloadT > 0) {
@@ -5770,10 +5768,7 @@
         var ml = Math.sqrt(mx * mx + my * my);
         if (ml > 1) { mx /= ml; my /= ml; }
       }
-      if (aim === null) {
-        if (padActive()) { if (mx || my) aim = Math.atan2(my, mx); }
-        else aim = Math.atan2(mouse.wy - player.y, mouse.wx - player.x);
-      }
+      if (aim === null && !padActive()) aim = Math.atan2(mouse.wy - player.y, mouse.wx - player.x);
       if (keys['shift']) down |= 1 << 4;
       if (mouse.down) down |= 1 << 7;
     } else if (pad && padHit(9)) resume();
