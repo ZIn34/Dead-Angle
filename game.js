@@ -20,7 +20,10 @@
   var NAMES = ['VESPER', 'MAGPIE', 'KESTREL', 'SABLE', 'JUNIPER', 'HOLLOW', 'CINDER', 'WREN', 'OTTER',
                'RAVEN', 'LARK', 'FINCH', 'HERON', 'SWIFT', 'PLOVER', 'MARTIN', 'ROOK', 'CRANE', 'TEAL',
                'PETREL', 'SHRIKE', 'CURLEW', 'GANNET', 'BITTERN', 'AVOCET', 'DUNLIN', 'SISKIN', 'REDPOLL',
-               'FULMAR', 'JACKDAW', 'CHOUGH', 'WIGEON'];
+               'FULMAR', 'JACKDAW', 'CHOUGH', 'WIGEON', 'OSPREY', 'MERLIN', 'HOBBY', 'KITE', 'SHAG',
+               'PIPIT', 'LINNET', 'BUNTING', 'DIPPER', 'NUTHATCH', 'TWITE', 'SCOTER', 'EIDER', 'SMEW',
+               'GOSHAWK', 'KNOT', 'STINT', 'RUFF', 'QUAIL', 'CORNCRAKE', 'WHIMBREL', 'GODWIT', 'SNIPE',
+               'TERN', 'SKUA', 'PUFFIN', 'GUILLEMOT', 'RAZORBILL'];
 
   // Each weapon's noise is its identity - you learn who is carrying what from
   // the size and colour of the ring their shot throws.
@@ -64,7 +67,7 @@
   ];
 
   var MODES = {
-    br:   { field: 26, zone: true,  loot: true,  respawn: false, label: 'ALIVE' },
+    br:   { field: 48, zone: true,  loot: true,  respawn: false, label: 'ALIVE' },
     duel: { field: 2,  zone: false, loot: false, respawn: true,  label: 'SCORE', target: 5 },
     gun:  { field: 10, zone: false, loot: false, respawn: true,  label: 'LEVEL' },
     team: { field: 16, zone: false, loot: false, respawn: true,  label: 'SCORE', target: 40, teams: true },
@@ -84,8 +87,8 @@
   var TEAM_SKINS = [[1, 4, 15, 13, 9], [2, 0, 11, 10, 7]];
   var TEAM_TINT = ['124,231,216', '255,122,77'];
   var MODE_TEXT = {
-    br_cqb: 'Twenty-six drop into a dark warren of rooms and corridors. You land with empty hands \u2014 find a weapon before someone finds you, and stay inside the closing zone.',
-    br_world: 'Twenty-six drop into open ground scattered with buildings. Long sightlines, nowhere to hide in the open, and the loot is inside the structures.',
+    br_cqb: 'Forty-eight drop into a dark warren of rooms and corridors. You land with empty hands \u2014 find a weapon before someone finds you, and stay inside the closing zone.',
+    br_world: 'Forty-eight drop into open ground scattered with buildings. Long sightlines, nowhere to hide in the open, and the loot is inside the structures.',
     duel: 'One opponent, identical loadouts, on a small arena. First to five rounds. No looting \u2014 just you, them, and who moves quieter.',
     gun: 'Every elimination hands you the next weapon up the ladder: pistol, shotgun, sniper, rifle. Get a kill with the rifle to win. Everyone respawns.',
     zomb: 'A few turn at the start and more keep coming, faster as the clock runs down. The infected carry nothing and cannot shoot - they are faster than you, they find you without needing to see you, and a hit puts you on their side. Survive the clock and the living win; lose the last human and it is over.',
