@@ -5825,7 +5825,7 @@
     lobbyDrop();
     try { if (netConn) netConn.close(); } catch (err) {}
     try { if (netPeer) netPeer.destroy(); } catch (err) {}
-    if (netRole) { cgCall(function (c) { c.game.leftRoom(); }); if ($('cgInviteBtn')) $('cgInviteBtn').hidden = true; }
+    if (netRole) { cgCall(function (c) { c.game.leftRoom(); c.game.hideInviteButton(); }); if ($('cgInviteBtn')) $('cgInviteBtn').hidden = true; }
     netConn = null; netPeer = null; netRole = null; netPublic = false; netCode = '';
     pchat = []; if ($('pchatLog')) $('pchatLog').innerHTML = '';
     if (typeof queueOn !== 'undefined') queueOn = false;
@@ -6425,6 +6425,10 @@
                    ((state !== 'play' && state !== 'paused') || (typeof lobbyOpen === 'function' && lobbyOpen()));
     cgCall(function (c) {
       c.game.updateRoom({ roomId: netCode, isJoinable: joinable, inviteParams: { room: netCode } });
+      // their QA still looks for the (deprecated) invite button: shown while
+      // friends can join, hidden once the match is on or the room is full
+      if (joinable && state !== 'play' && state !== 'paused') c.game.showInviteButton({ room: netCode });
+      else c.game.hideInviteButton();
     });
     $('cgInviteBtn').hidden = !(netRole === 'host' && netCode);
   }
