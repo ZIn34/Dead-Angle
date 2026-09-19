@@ -5516,6 +5516,7 @@
   function syncMenu() {
     $('mapPick').hidden = (mode === 'duel');
     $('squadPick').hidden = !!MODES[mode].teams;
+    if (mode === 'tut') return;                   // the menu is not showing during the tutorial
     var t = mode === 'br' ? MODE_TEXT['br_' + mapKind] : MODE_TEXT[mode];
     if (mode !== 'br' && mode !== 'duel') {
       t += mapKind === 'world'
@@ -5665,6 +5666,7 @@
     cgGame('gameplayStop');
     netGuest = false; netGuestPaused = false;
     if (tutRestore) { mode = tutRestore.mode; mapKind = tutRestore.mapKind; blackout = tutRestore.blackout; squad = tutRestore.squad; tutRestore = null; MODE = MODES[mode]; }
+    setTimeout(syncMenu, 0);
     $('againBtn').hidden = false;
     state = 'menu';
     keys = {}; mouse.down = false;
@@ -5823,7 +5825,7 @@
     lobbyDrop();
     try { if (netConn) netConn.close(); } catch (err) {}
     try { if (netPeer) netPeer.destroy(); } catch (err) {}
-    if (netRole) { cgCall(function (c) { c.game.leftRoom(); c.game.hideInviteButton(); }); }
+    if (netRole) { cgCall(function (c) { c.game.leftRoom(); }); if ($('cgInviteBtn')) $('cgInviteBtn').hidden = true; }
     netConn = null; netPeer = null; netRole = null; netPublic = false; netCode = '';
     pchat = []; if ($('pchatLog')) $('pchatLog').innerHTML = '';
     if (typeof queueOn !== 'undefined') queueOn = false;
@@ -6423,9 +6425,8 @@
                    ((state !== 'play' && state !== 'paused') || (typeof lobbyOpen === 'function' && lobbyOpen()));
     cgCall(function (c) {
       c.game.updateRoom({ roomId: netCode, isJoinable: joinable, inviteParams: { room: netCode } });
-      if (joinable && state !== 'play') c.game.showInviteButton({ room: netCode });
-      else c.game.hideInviteButton();
     });
+    $('cgInviteBtn').hidden = !(netRole === 'host' && netCode);
   }
   function cgUser() {
     cgCall(function (c) {
@@ -6437,6 +6438,18 @@
       }).catch(function () {});
     });
   }
+  // a link friends can open straight into your party
+  $('cgInviteBtn').addEventListener('click', function () {
+    if (!CG || !netCode) return;
+    // their docs say this returns a promise; the SDK itself returns the string - take either
+    var got;
+    try { got = CG.game.inviteLink({ room: netCode }); } catch (err) { netStatus('Could not make an invite link.'); return; }
+    Promise.resolve(got).then(function (link) {
+      var done = function () { netStatus('Invite link copied - paste it to your friends.'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, function () { netStatus(link); });
+      else netStatus(link);
+    }).catch(function () { netStatus('Could not make an invite link.'); });
+  });
   function cgInit() {
     if (!CG_MODE) return;
     // no accounts, friends or friend chat of our own on CrazyGames
