@@ -1167,7 +1167,7 @@
   }
   function skinPrice(i) { return i === BASE_SKIN ? 0 : (i >= 12 ? 500 : 200); }
 
-  var SET = { vol: 66, dead: 18, assist: true, shake: true, minimap: true };
+  var SET = { vol: 66, dead: 18, shake: true, minimap: true };
   function loadSettings() {
     try {
       var raw = localStorage.getItem('earshot.settings');
@@ -2953,7 +2953,7 @@
     if (!I.net && rx * rx + ry * ry < 0.09) { rx = 0; ry = 0; }
     if (rx || ry) {
       e.stickAimAt = performance.now();
-      e.ang = I.net ? Math.atan2(ry, rx) : aimAssist(e, Math.atan2(ry, rx));
+      e.ang = Math.atan2(ry, rx);
     } else if (I.touch && sticks.aim) {
       var adx = sticks.aim.x - sticks.aim.ox, ady = sticks.aim.y - sticks.aim.oy;
       if (Math.sqrt(adx * adx + ady * ady) > 10) e.ang = Math.atan2(ady, adx);
@@ -4869,23 +4869,6 @@
   }
 
   // Nudge the aim toward whoever is closest to where you are already pointing.
-  // A gentle pull toward someone you can actually see, close to where you are
-  // already aiming. Never toward anyone hidden in the dark, and never a snap.
-  function aimAssist(e, ang) {
-    if (!SET.assist) return ang;
-    var best = null, bestOff = 0.17;
-    for (var i = 0; i < ents.length; i++) {
-      var o = ents[i];
-      if (o === e || !o.alive || o.air || !foes(e, o)) continue;
-      var d = dist(e, o);
-      if (d > Math.min(460, VIEW_R) || !sightClear(e.x, e.y, o.x, o.y)) continue;
-      var want = Math.atan2(o.y - e.y, o.x - e.x);
-      var off = ((want - ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-      if (Math.abs(off) < bestOff) { bestOff = Math.abs(off); best = off; }
-    }
-    return best === null ? ang : ang + best * 0.45;
-  }
-
   // ---- driving the screens with a pad ------------------------------------
   var uiScr = null, uiIdx = 0, uiRepeat = 0;
   function uiScreen() {
@@ -5182,7 +5165,7 @@
   function syncSettings() {
     $('setVol').value = SET.vol; $('setVolV').textContent = SET.vol;
     $('setDead').value = SET.dead; $('setDeadV').textContent = SET.dead;
-    [['setAssist', 'assist'], ['setShake', 'shake'], ['setMap', 'minimap']].forEach(function (pair) {
+    [['setShake', 'shake'], ['setMap', 'minimap']].forEach(function (pair) {
       var b = $(pair[0]);
       b.textContent = SET[pair[1]] ? 'ON' : 'OFF';
       b.className = 'tgl' + (SET[pair[1]] ? ' on' : '');
@@ -5197,7 +5180,7 @@
   $('setDead').addEventListener('input', function () {
     SET.dead = parseInt(this.value, 10); $('setDeadV').textContent = SET.dead; saveSettings();
   });
-  [['setAssist', 'assist'], ['setShake', 'shake'], ['setMap', 'minimap']].forEach(function (pair) {
+  [['setShake', 'shake'], ['setMap', 'minimap']].forEach(function (pair) {
     $(pair[0]).addEventListener('click', function () {
       SET[pair[1]] = !SET[pair[1]];
       saveSettings();
