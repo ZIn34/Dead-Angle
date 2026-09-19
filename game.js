@@ -2949,6 +2949,7 @@
     // a pad; otherwise the cursor. Never left pointing at nothing.
     var rx = I.pad ? I.ax(2) : 0, ry = I.pad ? I.ax(3) : 0;
     if (rx || ry) {
+      e.stickAimAt = performance.now();
       e.ang = I.net ? Math.atan2(ry, rx) : aimAssist(e, Math.atan2(ry, rx));
     } else if (I.touch && sticks.aim) {
       var adx = sticks.aim.x - sticks.aim.ox, ady = sticks.aim.y - sticks.aim.oy;
@@ -3256,6 +3257,7 @@
     for (var la = 0; la < locals.length; la++) {
       var LA = locals[la];
       if (!LA.alive || LA.down || !LA.ctl || !LA.ctl.kb || mouse.sx === undefined || usingPad(LA)) continue;
+      if (performance.now() - (LA.stickAimAt || -1e9) < 1500) continue;
       LA.ang = Math.atan2(mouse.wy - LA.y, mouse.wx - LA.x);
     }
 
@@ -4828,7 +4830,7 @@
     var rest = padRest[g.index];
     if (!rest) { rest = padRest[g.index] = g.axes.slice(); return false; }
     for (var j = 0; j < g.buttons.length; j++) if (g.buttons[j] && g.buttons[j].pressed) return true;
-    for (j = 0; j < g.axes.length; j++) if (Math.abs(g.axes[j] - (rest[j] || 0)) > 0.45) return true;
+    for (j = 0; j < g.axes.length; j++) if (Math.abs(g.axes[j] - (rest[j] || 0)) > Math.max(0.2, SET.dead / 100)) return true;
     return false;
   }
   function pollPad() {
