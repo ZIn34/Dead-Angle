@@ -208,6 +208,7 @@
     } catch (err) { music = null; }
   }
   function musicLevel() {
+    if (muted) return 0;
     var inMatch = state === 'play' || state === 'paused' || state === 'ending';
     return clamp((SET.music / 100) * (SET.vol / 100) * (inMatch ? 0.5 : 1), 0, 1);
   }
@@ -1180,9 +1181,21 @@
   // Everyone starts in plain grey; credits come from playing and buy the rest.
   var BASE_SKIN = 9;
   var WALLET = { coins: 0, owned: [BASE_SKIN], skin: BASE_SKIN };
+  var CG_MODE = window.DEAD_ANGLE_PLATFORM === 'crazygames';
+  var CG = null;                          // the CrazyGames SDK, once it is ready
+  function storeGet(k) {
+    try {
+      if (CG && CG.data) { var v = CG.data.getItem(k); if (v !== null && v !== undefined) return v; }
+      return localStorage.getItem(k);
+    } catch (err) { return null; }
+  }
+  function storeSet(k, v) {
+    try { if (CG && CG.data) CG.data.setItem(k, v); } catch (err) {}
+    try { localStorage.setItem(k, v); } catch (err) {}
+  }
   function loadWallet() {
     try {
-      var raw = localStorage.getItem('earshot.wallet');
+      var raw = storeGet('earshot.wallet');
       if (raw) {
         var w = JSON.parse(raw);
         if (w && w.owned && w.owned.length) {
@@ -1193,7 +1206,7 @@
     } catch (err) { /* private window or blocked storage - stay on the default */ }
   }
   function saveWallet() {
-    try { localStorage.setItem('earshot.wallet', JSON.stringify(WALLET)); } catch (err) {}
+    storeSet('earshot.wallet', JSON.stringify(WALLET));
     if (typeof cloudWallet === 'function') cloudWallet();
   }
   function skinPrice(i) { return i === BASE_SKIN ? 0 : (i >= 12 ? 500 : 200); }
@@ -1201,7 +1214,7 @@
   var SET = { vol: 66, music: 45, dead: 18, shake: true, minimap: true };
   function loadSettings() {
     try {
-      var raw = localStorage.getItem('earshot.settings');
+      var raw = storeGet('earshot.settings');
       if (raw) {
         var v = JSON.parse(raw);
         if (v) for (var k in SET) if (v[k] !== undefined) SET[k] = v[k];
@@ -1209,7 +1222,7 @@
     } catch (err) { /* blocked storage: keep the defaults */ }
   }
   function saveSettings() {
-    try { localStorage.setItem('earshot.settings', JSON.stringify(SET)); } catch (err) {}
+    storeSet('earshot.settings', JSON.stringify(SET));
     if (master) master.gain.value = SET.vol / 100;
   }
   function skinOwned(i) { return WALLET.owned.indexOf(i) >= 0; }
@@ -1720,6 +1733,7 @@
     if ($('chat') && !$('chat').hidden) closeChat(), $('friends').hidden = true;
     state = 'play';
     syncHud();
+    cgGame('gameplayStart'); cgRoom();
     if (netRole === 'host') for (var gs = 0; gs < netGuests.length; gs++) if (netGuests[gs].ent) netSendTo(netGuests[gs], startMsg(netGuests[gs]));
     lobbyTouch();
   }
@@ -1971,13 +1985,13 @@
     }
   }
   function tutDone() {
-    try { localStorage.setItem('earshot.tutDone', '1'); } catch (err) {}
+    storeSet('earshot.tutDone', '1');
     goHome();
     syncTutBtn();
   }
   function syncTutBtn() {
     var done = false;
-    try { done = localStorage.getItem('earshot.tutDone') === '1'; } catch (err) {}
+    done = storeGet('earshot.tutDone') === '1';
     var b = $('tutBtn');
     if (b) { b.className = done ? 'go ghost' : 'go'; b.textContent = done ? 'TUTORIAL' : 'TUTORIAL \u2014 START HERE'; }
   }
@@ -2533,6 +2547,7 @@
     return lastWinner === e || (squad > 1 && lastWinner.team === e.team);
   }
   function finish(won, msg, place) {
+    cgGame('gameplayStop');
     // With several people playing, each wins or loses for their own side.
     var hostSide = won;
     if (locals.length > 1) won = wonFor(player, hostSide);
@@ -2551,6 +2566,7 @@
       big = won ? 'WIN' : 'LOSS';
       small = 'LEVEL ' + Math.min(player.level + 1, LADDER.length) + ' / ' + LADDER.length;
     }
+    if (won) cgGame('happytime');
     var earned = kills * 12 + Math.round(matchTime / 6) + (won ? 80 : 0);
     WALLET.coins += earned;
     saveWallet();
@@ -5461,6 +5477,7 @@
 
   var MODE_LABEL = { tut: 'Tutorial', br: 'Battle royale', duel: '1v1', gun: 'Gun game', team: 'Teams 5v5', war: 'War 10v10', ctf: 'Capture the flag', sect: 'Sector capture', zomb: 'Infection' };
   function pause() {
+    cgGame('gameplayStop');
     if (netGuest) {                                   // the host's match keeps going
       netGuestPaused = true;
       $('pauseSub').textContent = 'ONLINE \u00b7 the match keeps running';
@@ -5475,6 +5492,7 @@
     elPaused.hidden = false;
   }
   function resume() {
+    cgGame('gameplayStart');
     if (netGuest) { netGuestPaused = false; elPaused.hidden = true; return; }
     if (state !== 'paused') return;
     state = 'play';
@@ -5568,7 +5586,8 @@
     if (ev.key === 'Enter') { sendPartyChat(this.value); this.value = ''; closeIgChat(); }
     else if (ev.key === 'Escape') closeIgChat();
   });
-  function openIgChat() { keys = {}; mouse.down = false; $('igChat').hidden = false; $('igChatInput').focus(); }
+  function openIgChat() {
+    if (cgNoChat()) return; keys = {}; mouse.down = false; $('igChat').hidden = false; $('igChatInput').focus(); }
   function closeIgChat() { $('igChat').hidden = true; $('igChatInput').blur(); }
   $('modeRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
@@ -5643,6 +5662,7 @@
   }
 
   function goHome() {
+    cgGame('gameplayStop');
     netGuest = false; netGuestPaused = false;
     if (tutRestore) { mode = tutRestore.mode; mapKind = tutRestore.mapKind; blackout = tutRestore.blackout; squad = tutRestore.squad; tutRestore = null; MODE = MODES[mode]; }
     $('againBtn').hidden = false;
@@ -5803,6 +5823,7 @@
     lobbyDrop();
     try { if (netConn) netConn.close(); } catch (err) {}
     try { if (netPeer) netPeer.destroy(); } catch (err) {}
+    if (netRole) { cgCall(function (c) { c.game.leftRoom(); c.game.hideInviteButton(); }); }
     netConn = null; netPeer = null; netRole = null; netPublic = false; netCode = '';
     pchat = []; if ($('pchatLog')) $('pchatLog').innerHTML = '';
     if (typeof queueOn !== 'undefined') queueOn = false;
@@ -5825,8 +5846,10 @@
         netRole = 'host'; netCode = code;
         $('netCode').textContent = code;
         $('netCodeBox').hidden = false;
-        netStatus('Party open. Friends join with this code, or invite them from your friends list.');
+        netStatus(CG_MODE ? 'Party open. Share the invite link or this code.'
+                          : 'Party open. Friends join with this code, or invite them from your friends list.');
         partyRender();
+        cgRoom();
         syncMenu();
         if (typeof then === 'function') then();
       });
@@ -5872,7 +5895,7 @@
     } else if (m.t === 'pchat') {
       partySay(g.name, m.text);
     } else if (m.t === 'hi') {
-      g.name = String(m.name || 'PLAYER').replace(/[^A-Za-z0-9_]/g, '').slice(0, 16) || 'PLAYER';
+      g.name = String(m.name || 'PLAYER').replace(/[^A-Za-z0-9_.]/g, '').slice(0, 20) || 'PLAYER';
       g.skin = clamp(m.skin | 0, 0, 15); g.uid = String(m.uid || ''); g.party = !m.pub;
       if (humansIn() >= NET_MAX || (m.pub && !netPublic)) {
         netSendTo(g, { t: 'full' });
@@ -6030,6 +6053,7 @@
     return n;
   }
   function partyBroadcast() {
+    cgRoom();
     if (netRole === 'host') netSendAll({ t: 'party', names: partyNames(), code: netCode,
       pick: MODE_LABEL[mode] + (mode !== 'duel' ? ' \u00b7 ' + mapKind.toUpperCase() : '') + (MODES[mode].teams ? '' : (squad > 1 ? ' \u00b7 DUOS' : ' \u00b7 SOLO')) +
         ' \u00b7 ' + ['CALM', 'STANDARD', 'RUTHLESS'][difficulty] + ' BOTS' + (botFill < 1 ? (botFill < 0.5 ? ' (FEW)' : ' (HALF)') : '') });
@@ -6066,6 +6090,7 @@
   var pchat = [];
   function escHtml(t) { return String(t).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
   function pchatAdd(from, text) {
+    if (cgNoChat()) return;
     pchat.push({ from: from, text: text });
     if (pchat.length > 60) pchat.shift();
     var log = $('pchatLog');
@@ -6104,7 +6129,7 @@
   function cleanText(t) { return typeof clean === 'function' ? clean(t) : t; }
   function pchatVisible() {
     var box = $('partyChat');
-    if (box) box.hidden = !(netRole === 'guest' || (netRole === 'host' && netGuests.length > 0));
+    if (box) box.hidden = cgNoChat() || !(netRole === 'guest' || (netRole === 'host' && netGuests.length > 0));
   }
 
   // Public-match hooks; the accounts module fills these in when it loads.
@@ -6138,6 +6163,7 @@
           netSend({ t: 'hi', skin: WALLET.skin, name: acctName || 'PLAYER', uid: acctUid(), pub: !!pub });
           netStatus(pub ? 'Joining a match...' : 'Connected! Waiting for the host to start a match.');
           syncMenu();
+          cgRoom();
         });
         conn.on('data', guestReceive);
         conn.on('close', function () { if (netConn === conn) { if (!opened) fail('Could not connect.'); else netClose('The host closed the game.'); } });
@@ -6198,10 +6224,13 @@
     elHud.hidden = false; elHud.classList.remove('split');
     netGuest = true; netGuestPaused = false;
     state = 'play';
+    cgGame('gameplayStart');
   }
 
   function guestOver(m) {
     if (!netGuest) return;
+    cgGame('gameplayStop');
+    if (m.won) cgGame('happytime');
     var earned = (m.kills || 0) * 12 + Math.round((m.time || 0) / 6) + (m.won ? 80 : 0);
     WALLET.coins += earned;
     saveWallet();
@@ -6369,6 +6398,83 @@
   $('netBack').addEventListener('click', function () { $('online').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('netLeave').addEventListener('click', function () { netClose('Disconnected.'); });
 
+  // ---------------------------------------------------------------- crazygames
+  var cgSet = { disableChat: false, muteAudio: false };
+  function cgCall(fn) { if (!CG) return; try { fn(CG); } catch (err) {} }
+  var cgPlaying = false;
+  function cgGame(what) {
+    // start/stop only on a real change - repeats are throttled and flagged
+    if (what === 'gameplayStart') { if (cgPlaying) return; cgPlaying = true; }
+    if (what === 'gameplayStop') { if (!cgPlaying) return; cgPlaying = false; }
+    cgCall(function (c) { if (c.game && c.game[what]) c.game[what](); });
+  }
+  function cgNoChat() { return !!cgSet.disableChat; }
+  function cgApply(st) {
+    cgSet = st || cgSet;
+    muted = !!cgSet.muteAudio;
+    pchatVisible();
+    if (cgNoChat() && $('igChat') && !$('igChat').hidden) $('igChat').hidden = true;
+  }
+  // tell CrazyGames which room we are in and whether friends can still come
+  function cgRoom() {
+    if (!CG) return;
+    if (!netRole || !netCode) return;
+    var joinable = netRole === 'host' && humansIn() < NET_MAX &&
+                   ((state !== 'play' && state !== 'paused') || (typeof lobbyOpen === 'function' && lobbyOpen()));
+    cgCall(function (c) {
+      c.game.updateRoom({ roomId: netCode, isJoinable: joinable, inviteParams: { room: netCode } });
+      if (joinable && state !== 'play') c.game.showInviteButton({ room: netCode });
+      else c.game.hideInviteButton();
+    });
+  }
+  function cgUser() {
+    cgCall(function (c) {
+      if (!c.user || !c.user.isUserAccountAvailable) return;
+      c.user.getUser().then(function (u) {
+        if (u && u.username) acctName = u.username;
+        $('acctName').textContent = acctName;
+        syncMenu();
+      }).catch(function () {});
+    });
+  }
+  function cgInit() {
+    if (!CG_MODE) return;
+    // no accounts, friends or friend chat of our own on CrazyGames
+    acctName = 'GUEST' + (1000 + rnd(9000));
+    $('acctBtn').hidden = true;
+    $('friendsBtn').hidden = true;
+    $('acctName').textContent = acctName;
+    var sdk = window.CrazyGames && window.CrazyGames.SDK;
+    if (!sdk) { cgLand(); return; }                        // blocked (ad blocker): play on regardless
+    sdk.init().then(function () {
+      CG = sdk;
+      // bring anything saved before the SDK was ready into their storage
+      ['earshot.wallet', 'earshot.settings', 'earshot.tutDone'].forEach(function (k) {
+        try { if (CG.data.getItem(k) === null) { var v = localStorage.getItem(k); if (v !== null) CG.data.setItem(k, v); } } catch (err) {}
+      });
+      loadWallet(); loadSettings(); refreshCoins(); syncTutBtn();
+      cgApply(CG.game.settings);
+      CG.game.addSettingsChangeListener(cgApply);
+      cgUser();
+      CG.user.addAuthListener(function () { cgUser(); loadWallet(); refreshCoins(); });
+      // someone clicked a friend's invite while already playing
+      CG.game.addJoinRoomListener(function (p) {
+        if (!p || !p.room) return;
+        if (state === 'play' || state === 'paused') leaveMatch();
+        openOnline(); joinGame(p.room, false);
+      });
+      var inv = CG.game.inviteParams;
+      if (inv && inv.room) { openOnline(); joinGame(inv.room, false); return; }
+      if (CG.game.isInstantMultiplayer) { openOnline(); hostGame(); return; }
+      cgLand();
+    }).catch(function () { cgLand(); });
+  }
+  // New players land straight in the action: the tutorial the first time,
+  // the menu after that.
+  function cgLand() {
+    if (storeGet('earshot.tutDone') !== '1' && state === 'menu') $('tutBtn').click();
+  }
+
   // ---------------------------------------------------------------- accounts
   // Firebase is only an address book here: who you are, who your friends are,
   // which public matches are open. The matches themselves still run peer to
@@ -6431,6 +6537,7 @@
     if (c === 'auth/network-request-failed' || c === 'unavailable') return 'No connection to the account service.';
     if (c === 'auth/operation-not-allowed') return 'Username sign-in is not switched on in Firebase yet (Email/Password).';
     if (c === 'permission-denied') return 'The game database is not set up yet (Firestore rules).';
+    if (c === 'auth/admin-restricted-operation') return 'Quick Play needs Anonymous sign-in switched on in Firebase.';
     if (c === 'auth/weak-password') return 'Pick a longer password (6+ characters).';
     return (err && err.message) || 'Something went wrong.';
   }
@@ -6483,6 +6590,7 @@
   }
 
   function onAuth(user) {
+    if (CG_MODE) { fbUser = user || null; return; }
     fbUser = user || null;
     if (fbInvUnsub) { fbInvUnsub(); fbInvUnsub = null; }
     if (fbBeatT) { clearInterval(fbBeatT); fbBeatT = null; }
@@ -6772,7 +6880,17 @@
 
   // ---- quick play ----
   function quickPlay() {
-    if (!fbUser || !acctName) { openAccount('Log in to play online.'); return; }
+    if (CG_MODE && !fbUser) {
+      openOnline();
+      quickStatus('Connecting...');
+      loadFirebase(function () {
+        if (fbAuth.currentUser) { fbUser = fbAuth.currentUser; quickPlay(); return; }
+        fbAuth.signInAnonymously().then(function (c) { fbUser = c.user; quickPlay(); })
+          .catch(function (err) { quickStatus(errText(err)); });
+      });
+      return;
+    }
+    if (!CG_MODE && (!fbUser || !acctName)) { openAccount('Log in to play online.'); return; }
     if (netRole === 'guest') { openOnline(); netStatus('You are in a party - the leader starts the match.'); return; }
     initAudio();
     if (netRole === 'host' && netGuests.length) { goPublicHost(); return; }
@@ -6877,7 +6995,7 @@
   });
   // the friends list keeps itself fresh while you are looking at it
   setInterval(function () { if (!$('friends').hidden && fbUser) renderFriends(); }, 15000);
-  loadFirebase(function () {});
+  if (!CG_MODE) loadFirebase(function () {});
 
   // ---------------------------------------------------------------- loop
   var last = performance.now();
@@ -6903,5 +7021,6 @@
   refreshCoins();
   syncMenu();
   syncTutBtn();
+  cgInit();
   requestAnimationFrame(frame);
 })();
