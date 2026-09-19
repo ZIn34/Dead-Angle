@@ -5069,6 +5069,15 @@
   // Squadmates are the one thing the dark does not hide - you would be on
   // comms with them. Enemies stay unmarked.
   var noOverlay = false;            // screenshot tool: world only, no markers
+  function pill(txt, x, y, tint) {
+    var w = ctx.measureText(txt).width + 12;
+    ctx.fillStyle = 'rgba(13,15,18,.82)';
+    ctx.fillRect(x - w / 2, y - 8, w, 16);
+    ctx.strokeStyle = tint; ctx.lineWidth = 1.5;
+    ctx.strokeRect(x - w / 2 + 0.5, y - 7.5, w - 1, 15);
+    ctx.fillStyle = tint;
+    ctx.fillText(txt, x, y + 0.5);
+  }
   function renderAllies() {
     if (noOverlay || !player.alive) return;
     var mates = [];
@@ -5102,27 +5111,35 @@
       sy = clamp(sy, pad, ch - pad);
       ctx.fillStyle = tint;
       ctx.strokeStyle = '#0d0f12';
+      var pulse = 1 + Math.sin(performance.now() / 260 + m) * 0.12;
       if (off) {
+        // off screen: a big arrow on the edge, their name and how far
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(ang);
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(-7, -8); ctx.lineTo(8, 0); ctx.lineTo(-7, 8); ctx.closePath();
+        ctx.shadowColor = tint; ctx.shadowBlur = 10;
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(-10, -12); ctx.lineTo(13, 0); ctx.lineTo(-10, 12); ctx.closePath();
         ctx.stroke(); ctx.fill();
         ctx.restore();
-        ctx.font = '700 9px "IBM Plex Mono", monospace';
-        ctx.lineWidth = 3;
-        var lbl = (human ? t.name + ' ' : '') + d + 'u';
-        ctx.strokeText(lbl, sx, sy + 18); ctx.fillText(lbl, sx, sy + 18);
+        ctx.font = '700 10px "IBM Plex Mono", monospace';
+        var lbl = (human ? t.name + '  ' : '') + d + 'u';
+        pill(lbl, sx, sy + 24, tint);
       } else {
-        // a solid marker and a name over their head
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(sx - 8, sy - 30); ctx.lineTo(sx + 8, sy - 30); ctx.lineTo(sx, sy - 19); ctx.closePath();
+        // on screen: a ring at their feet, a bold marker and a name tag
+        var rr2 = (t.r + 9) * zoom * pulse;
+        ctx.lineWidth = 5; ctx.strokeStyle = '#0d0f12';
+        ctx.beginPath(); ctx.arc(sx, sy, rr2, 0, 6.2832); ctx.stroke();
+        ctx.lineWidth = 2.5; ctx.strokeStyle = tint;
+        ctx.beginPath(); ctx.arc(sx, sy, rr2, 0, 6.2832); ctx.stroke();
+        var my = sy - rr2 - 10;
+        ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 4;
+        ctx.shadowColor = tint; ctx.shadowBlur = 8;
+        ctx.beginPath(); ctx.moveTo(sx - 11, my - 12); ctx.lineTo(sx + 11, my - 12); ctx.lineTo(sx, my + 2); ctx.closePath();
         ctx.stroke(); ctx.fill();
-        ctx.font = (human ? '700 10px' : '600 9px') + ' "IBM Plex Mono", monospace';
-        var nm = t.down ? t.name + ' DOWN' : t.name;
-        ctx.strokeText(nm, sx, sy - 40); ctx.fillText(nm, sx, sy - 40);
+        ctx.shadowBlur = 0;
+        ctx.font = (human ? '700 11px' : '700 10px') + ' "IBM Plex Mono", monospace';
+        pill(t.down ? t.name + ' DOWN' : t.name, sx, my - 24, tint);
       }
     }
     ctx.textAlign = 'left';
