@@ -3687,6 +3687,12 @@
       return window.EARSHOT.net();
     },
     padInfo: function () { return { active: padActive(), padLast: padLast, kbmLast: kbmLast, rest: padRest, now: performance.now() }; },
+    aimInfo: function () {
+      return { sx: mouse.sx, sy: mouse.sy, wx: mouse.wx, wy: mouse.wy, camX: cam.x, camY: cam.y,
+               pcam: player && player.cam === cam, px: player && player.x, py: player && player.y, ang: player && player.ang,
+               leadX: player && player.leadX, zoom: zoom, pzoom: player && player.zoom, cw: cw, ch: ch, vw: player && player.vw,
+               padOn: padActive(), touch: touchMode, down: mouse.down };
+    },
     net: function () {
       return { role: netRole, guest: netGuest, open: !!(netConn && netConn.open), guests: netGuests.map(function (g) { return g.name + (g.ent ? '@' + g.ent.id : ''); }), sent: netStat.sent, recv: netStat.recv,
                err: netStat.err, queue: netQueue.length, hasPlayer: !!player, ents: ents.length, state: state };
