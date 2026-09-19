@@ -1304,6 +1304,8 @@
   var plane = null;
   var PLANE_SPEED = 360, GLIDE_SPEED = 235, CHUTE_TIME = 3.2;
   var VX = 0, VY = 0, VW = 0, VH = 0;       // the viewport being drawn into
+  // two people on one screen, on opposite sides
+  function splitVs() { return splitOn && locals.length > 1 && locals[0].team !== locals[1].team; }
   function anyLocalAlive() {
     for (var i = 0; i < locals.length; i++) if (locals[i].alive) return true;
     return false;
@@ -2530,6 +2532,7 @@
     if (e.hp > 0 && e.hp <= 50 && !isZombie(e) && hitBy && hitBy !== e && !e.down) {
       if (!e.bleeding && e.local) feed('<b>BLEEDING</b> - use a stim', true);
       e.bleeding = true; e.bleedBy = fromId;
+      e.bleedLeft = 20;                         // a wound costs at most 20 HP
     }
     if (e.bot) { e.flinch = 0.35; if (e.aimOff !== undefined) e.aimOff += rr(-0.06, 0.06); }
     bleed(e.x, e.y, ang, amount, false, bloodOf(e));
@@ -2763,6 +2766,7 @@
     // With several people playing, each wins or loses for their own side.
     var hostSide = won;
     if (locals.length > 1) won = wonFor(player, hostSide);
+    var vsRes = splitVs() ? [won, wonFor(locals[1], hostSide)] : null;
     for (var gz = 0; gz < netGuests.length; gz++) {
       var gg = netGuests[gz];
       if (gg.ent) netSendOver(gg, wonFor(gg.ent, hostSide), msg, gg.ent.alive ? 1 : (gg.ent.place || place));
@@ -2787,7 +2791,7 @@
     state = 'ending';
     // Everything the results screen needs is captured now: if a new match has
     // started by the time this fires, it must leave that match alone.
-    var tok = matchToken, res = result, why = overCause;
+    var tok = matchToken, res = result, why = overCause, vs = vsRes;
     var k = kills, t = matchTime, sh = shots, ht = hits;
     setTimeout(function () {
       if (tok !== matchToken) return;
@@ -2795,6 +2799,18 @@
       $('placeN').textContent = res.big;
       $('placeN').className = res.won ? 'win' : '';
       $('placeL').textContent = res.small;
+      // versus on one screen: each half gets its own verdict
+      $('vsRes').hidden = !vs;
+      document.querySelector('#over .place').hidden = !!vs;
+      if (vs) {
+        [['vsL', vs[0], 'P1'], ['vsR', vs[1], 'P2']].forEach(function (v) {
+          var el = $(v[0]);
+          el.className = 'vshalf ' + (v[1] ? 'win' : 'loss');
+          el.querySelector('b').textContent = v[1] ? 'VICTORY' : 'LOSS';
+          el.querySelector('s').textContent = v[2];
+        });
+        $('vsRes').className = 'vsres ' + (cw >= ch ? 'side' : 'stack');
+      }
       $('overMsg').textContent = why;
       $('stKills').textContent = k;
       $('stTime').textContent = fmtTime(t);
@@ -3721,7 +3737,9 @@
       var bl = ents[i];
       if (!bl.alive || !bl.bleeding || bl.down || bl.air) continue;
       if (godMode && bl === player) continue;
-      bl.hp -= 5 * dt;
+      var bd = Math.min(1 * dt, bl.bleedLeft || 0);    // 1 HP a second
+      bl.hp -= bd; bl.bleedLeft = (bl.bleedLeft || 0) - bd;
+      if (bl.bleedLeft <= 0 && bl.hp > 0) { bl.bleeding = false; continue; }
       if (bl.hp <= 0) { bl.hp = 0; bl.bleeding = false; hitCause = 'bleed'; kill(bl, ents[bl.bleedBy] && ents[bl.bleedBy] !== bl ? bl.bleedBy : -1); hitCause = 'gun'; }
     }
     if (mode === 'tut') tutTick(dt);
@@ -4866,7 +4884,7 @@
     renderHostHold();
     renderAllies();
     renderObjectives();
-    if (SET.minimap) drawMinimap();
+    if (SET.minimap && !splitVs()) drawMinimap();
     renderReticle();
     renderDowned();
     renderPrompt();
@@ -5466,7 +5484,7 @@
       ctx.save();
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.font = '400 15px "Russo One", "Chakra Petch", sans-serif';
-      var bt = 'BLEEDING  \u00b7  ' + promptKey('F', 'Y') + ' TO USE A STIM' + (player.meds ? '' : ' (NONE - FIND ONE)');
+      var bt = 'BLEEDING ' + Math.ceil(player.bleedLeft || 0) + ' HP  \u00b7  ' + promptKey('F', 'Y') + ' TO USE A STIM' + (player.meds ? '' : ' (NONE - FIND ONE)');
       ctx.lineWidth = 4; ctx.strokeStyle = '#0d0f12'; ctx.strokeText(bt, cw / 2, ch * 0.78);
       ctx.fillStyle = '#ff5a68'; ctx.fillText(bt, cw / 2, ch * 0.78);
       ctx.restore();

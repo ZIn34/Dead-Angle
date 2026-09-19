@@ -183,6 +183,18 @@ h1 .gold{color:var(--gold)}
 .place b{font-family:var(--font-x);font-weight:400;font-size:clamp(54px,16vw,98px);line-height:.9;color:var(--paper);font-variant-numeric:tabular-nums;-webkit-text-stroke:3px var(--out);paint-order:stroke fill;text-shadow:5px 6px 0 var(--out)}
 .place b.win{color:var(--gold)}
 .place s{text-decoration:none;font-family:var(--font-m);font-size:11px;letter-spacing:.3em;color:var(--khaki)}
+.vsres{position:fixed;inset:0;display:flex;pointer-events:none;z-index:0}
+.vsres.stack{flex-direction:column}
+.vshalf{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:9vh;gap:6px}
+.vsres.side .vshalf + .vshalf{border-left:3px solid var(--out)}
+.vsres.stack .vshalf + .vshalf{border-top:3px solid var(--out)}
+.vshalf.win{background:linear-gradient(180deg,rgba(242,189,29,.28),rgba(242,189,29,0) 60%)}
+.vshalf.loss{background:linear-gradient(180deg,rgba(255,77,94,.24),rgba(255,77,94,0) 60%)}
+.vshalf b{font-family:var(--font-x);font-weight:400;font-size:clamp(34px,7vw,76px);letter-spacing:.06em;-webkit-text-stroke:3px var(--out);paint-order:stroke fill;text-shadow:4px 5px 0 var(--out)}
+.vshalf.win b{color:var(--gold)}
+.vshalf.loss b{color:#ff5a68}
+.vshalf s{text-decoration:none;font-family:var(--font-x);font-size:18px;letter-spacing:.2em;color:var(--paper)}
+#over .panel{position:relative;z-index:1}
 .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;background:var(--out);border:3px solid var(--out);width:100%;max-width:400px;box-shadow:4px 4px 0 rgba(0,0,0,.45)}
 .stats div{background:var(--navy);padding:13px 8px;display:flex;flex-direction:column;gap:5px}
 .stats strong{font-family:var(--font-x);font-size:22px;font-weight:400;color:var(--paper);font-variant-numeric:tabular-nums}
@@ -521,6 +533,10 @@ h1 .gold{color:var(--gold)}
   <div class="screen" id="over" hidden>
     <div class="panel">
       <div class="place"><b id="placeN">#4</b><s id="placeL">OF 10</s></div>
+      <div class="vsres side" id="vsRes" hidden>
+        <div class="vshalf" id="vsL"><s>P1</s><b>VICTORY</b></div>
+        <div class="vshalf" id="vsR"><s>P2</s><b>LOSS</b></div>
+      </div>
       <p class="premise" id="overMsg">Shot in a corridor you never saw the end of.</p>
       <div class="stats">
         <div><strong id="stKills">0</strong><span>ELIMS</span></div>
