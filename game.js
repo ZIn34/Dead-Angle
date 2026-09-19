@@ -3257,14 +3257,18 @@
     var lerp = 1 - Math.pow(0.0001, dt);
     for (var li = 0; li < locals.length; li++) {
       var L = locals[li], lc = L.cam || cam;
-      var tx = L.x, ty = L.y;
-      // the mouse leads the camera for whoever is on it
+      // The camera is pinned to you; only the look-ahead toward the cursor
+      // eases in. A camera that trailed behind let you walk out from under
+      // a still cursor and spun you round to face backwards.
+      var lx = 0, ly = 0;
       if (!touchMode && L.ctl && L.ctl.kb && (L.ctl.any || !usingPad(L))) {
-        tx += clamp(mouse.wx - L.x, -110, 110) * 0.2;
-        ty += clamp(mouse.wy - L.y, -110, 110) * 0.2;
+        lx = clamp(mouse.wx - L.x, -110, 110) * 0.2;
+        ly = clamp(mouse.wy - L.y, -110, 110) * 0.2;
       }
-      lc.x += (tx - lc.x) * lerp;
-      lc.y += (ty - lc.y) * lerp;
+      L.leadX = (L.leadX || 0) + (lx - (L.leadX || 0)) * lerp;
+      L.leadY = (L.leadY || 0) + (ly - (L.leadY || 0)) * lerp;
+      lc.x = L.x + L.leadX;
+      lc.y = L.y + L.leadY;
     }
     // The camera just moved under a still cursor: re-read where the cursor
     // is now, so a mouse player faces exactly what is under it this frame.
@@ -5738,12 +5742,14 @@
 
     updateMouseWorld();
     var lerp = 1 - Math.pow(0.0001, dt);
-    var tx = player.x, ty = player.y;
+    var glx = 0, gly = 0;
     if (!touchMode && !padActive()) {
-      tx += clamp(mouse.wx - player.x, -110, 110) * 0.2;
-      ty += clamp(mouse.wy - player.y, -110, 110) * 0.2;
+      glx = clamp(mouse.wx - player.x, -110, 110) * 0.2;
+      gly = clamp(mouse.wy - player.y, -110, 110) * 0.2;
     }
-    cam.x += (tx - cam.x) * lerp; cam.y += (ty - cam.y) * lerp;
+    player.leadX = (player.leadX || 0) + (glx - (player.leadX || 0)) * lerp;
+    player.leadY = (player.leadY || 0) + (gly - (player.leadY || 0)) * lerp;
+    cam.x = player.x + player.leadX; cam.y = player.y + player.leadY;
     syncHud();
 
     // controls out, as a virtual pad
