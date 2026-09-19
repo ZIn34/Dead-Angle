@@ -1869,7 +1869,7 @@
   function jumpOpen() { return !!plane && plane.t >= JUMP_AFTER && !!plane.overLand; }
   function airControl(e, I, dt) {
     if (e.air === 'plane') {
-      var go = (I.pad && I.hit(0)) || (I.kb && e.jumpReq);
+      var go = (I.pad && (I.hit(PAD.jump) || I.hit(PAD.pickup))) || (I.kb && e.jumpReq);
       e.jumpReq = false;
       if (go && jumpOpen()) jumpOut(e);
       return;
@@ -1904,27 +1904,27 @@
       done: function () { return tut.t > 2.5; } },
     { title: 'SHOOT', k: 'Follow the gold marker to the targets. CLICK to shoot one', p: 'Follow the gold marker to the targets. RT to shoot one', mark: 'targets',
       done: function () { return tut.hits >= 1; } },
-    { title: 'RELOAD', k: 'R to reload', p: 'X to reload',
+    { title: 'RELOAD', k: 'R to reload', p: 'A to reload',
       start: function () { var sl = curSlot(player); if (sl) sl.ammo = Math.min(sl.ammo, 4); },
       done: function () { return player.reloadT > 0; } },
-    { title: 'PICK UP', k: 'Walk to the rifle (gold marker) and press E', p: 'Walk to the rifle (gold marker) and press A', mark: 'item',
+    { title: 'PICK UP', k: 'Walk to the rifle (gold marker) and press E', p: 'Walk to the rifle (gold marker) and press X', mark: 'item',
       start: function () { tutDrop('gun', 'silenced'); },
       done: function () { return hasGun(player, 'silenced'); } },
-    { title: 'SWAP', k: 'Q (or 1 / 2) swaps weapons', p: 'D-PAD LEFT / RIGHT swaps weapons',
+    { title: 'SWAP', k: 'Q (or 1 / 2) swaps weapons', p: 'LB or RB swaps weapons',
       start: function () { tut.slotWas = player.slot; },
       done: function () { return player.slot !== tut.slotWas; } },
-    { title: 'SPRINT', k: 'Hold SHIFT while walking - fast, but loud', p: 'Hold LB while walking - fast, but loud',
+    { title: 'SPRINT', k: 'Hold SHIFT while walking - fast, but loud', p: 'Hold LT while walking - fast, but loud',
       done: function () { return tut.sprint > 1.2; } },
-    { title: 'FRAG', k: 'G throws a frag - hit the group', p: 'LT throws a frag - hit the group', mark: 'targets',
+    { title: 'FRAG', k: 'G throws a frag - hit the group', p: 'D-PAD LEFT throws a frag - hit the group', mark: 'targets',
       start: function () { player.nades = Math.max(player.nades, 1); tut.have = player.nades; },
       done: function () { return player.nades < tut.have; } },
-    { title: 'SMOKE', k: 'H throws smoke - nobody sees through it', p: 'RB throws smoke - nobody sees through it',
+    { title: 'SMOKE', k: 'H throws smoke - nobody sees through it', p: 'D-PAD RIGHT throws smoke - nobody sees through it',
       start: function () { player.smokes = Math.max(player.smokes, 1); tut.have = player.smokes; },
       done: function () { return player.smokes < tut.have; } },
     { title: 'HEAL', k: 'You are hurt. F uses a stim', p: 'You are hurt. Y uses a stim',
       start: function () { player.hp = Math.min(player.hp, 45); player.meds = Math.max(player.meds, 1); tut.have = player.meds; },
       done: function () { return player.meds < tut.have; } },
-    { title: 'MELEE', k: 'V swings the gun butt - works with no ammo', p: 'B swings the gun butt - works with no ammo',
+    { title: 'MELEE', k: 'V swings the gun butt - works with no ammo', p: 'D-PAD UP (or click the right stick) swings the gun butt',
       done: function () { return player.meleeT > 0; } },
     { title: 'LISTEN', k: 'Every shot and footstep makes noise, and bots hunt by ear. In BLACKOUT you only see sound rings - a muzzle flash is the one exact giveaway.',
       p: null, wait: 7, done: function () { return tut.t > 7; } },
@@ -3321,6 +3321,11 @@
   // ---------------------------------------------------------------- player
   // One set of controls, read from whatever device this player owns. A lone
   // player takes whichever is in use; in split screen each has their own.
+  // A reload (and jump) - B drop (give up when downed) - X pick up - Y stim
+  // LB/RB swap - LT sprint - RT fire - d-pad left frag, right smoke, up melee
+  // (the right stick click melees too) - Start pause
+  var PAD = { reload: 0, jump: 0, drop: 1, giveup: 1, pickup: 2, stim: 3, swapL: 4, swapR: 5,
+              sprint: 6, fire: 7, pause: 9, melee2: 11, melee: 12, frag: 14, smoke: 15 };
   function inputFor(e) {
     var c = e.ctl || { any: true, kb: true };
     if (c.net) {
@@ -3397,16 +3402,15 @@
         ix = lx / (ll > 1 ? ll : 1); iy = ly / (ll > 1 ? ll : 1);
         padMove = true;
       }
-      if (I.hit(0)) playerPickup(e);
-      if (I.hit(1)) melee(e);
-      if (I.hit(2)) startReload(e);
-      if (I.hit(3)) useMed(e);
-      if (I.hit(14) || I.hit(15)) swapSlot(undefined, e);
-      if (I.hit(5)) throwNade(e, 'smoke');
-      if (I.hit(6)) throwNade(e, 'frag');
-      if (I.hit(12)) useMed(e);
-      if (I.hit(13)) dropWeapon(e);
-      if (I.hit(9)) { pause(); return; }
+      if (I.hit(PAD.pickup)) playerPickup(e);
+      if (I.hit(PAD.drop)) dropWeapon(e);
+      if (I.hit(PAD.reload)) startReload(e);
+      if (I.hit(PAD.stim)) useMed(e);
+      if (I.hit(PAD.swapL) || I.hit(PAD.swapR)) swapSlot(undefined, e);
+      if (I.hit(PAD.frag)) throwNade(e, 'frag');
+      if (I.hit(PAD.smoke)) throwNade(e, 'smoke');
+      if (I.hit(PAD.melee) || I.hit(PAD.melee2)) melee(e);
+      if (I.hit(PAD.pause)) { pause(); return; }
     }
     if (!padMove && I.touch && sticks.move) {
       var sdx = sticks.move.x - sticks.move.ox, sdy = sticks.move.y - sticks.move.oy;
@@ -3418,7 +3422,7 @@
       var l = Math.sqrt(ix * ix + iy * iy);
       if (l > 0) { ix /= l; iy /= l; }
     }
-    var sprinting = ((I.kb && !!keys['shift']) || (!!I.pad && I.down(4))) && (ix || iy);
+    var sprinting = ((I.kb && !!keys['shift']) || (!!I.pad && I.down(PAD.sprint))) && (ix || iy);
     var base = curW(e) ? 168 : (MODE.zombies && e.team === 1 ? 168 : 190);
     var speed = sprinting ? base * 1.45 : base;
     e._spd = (ix || iy) ? speed : 0;
@@ -3807,8 +3811,8 @@
     elMedsBox.className = 'meds' + (player.meds ? '' : ' none');
     var mk = $('medsKey'), nk = $('nadesKey'), sk2 = $('smokesKey');
     if (mk) mk.textContent = promptKey('F', 'Y');
-    if (nk) nk.textContent = promptKey('G', 'LT');
-    if (sk2) sk2.textContent = promptKey('H', 'RB');
+    if (nk) nk.textContent = promptKey('G', 'D-PAD \u25c0');
+    if (sk2) sk2.textContent = promptKey('H', 'D-PAD \u25b6');
     var nb2 = $('nadesN'), nbx = $('nadesBox');
     if (nb2) nb2.textContent = player.nades;
     if (nbx) nbx.className = 'meds' + (player.nades ? '' : ' none');
@@ -3887,7 +3891,8 @@
     elWep.className = 'wep' + (w && slot.ammo === 0 ? ' dry' : '');
     for (var k = 0; k < 2; k++) {
       var s = player.slots[k];
-      elSlot[k].textContent = (k + 1) + ' ' + (s ? WEAPONS[s.key].name : '\u2014');
+      var nm = s ? WEAPONS[s.key].name : '\u2014';
+      elSlot[k].textContent = usingPad(player) ? (k === 0 ? 'LB  ' + nm : nm + '  RB') : (k + 1) + '  ' + nm;
       elSlot[k].className = (s && player.slot === k) ? 'on' : '';
     }
     if (player.reloadT > 0 && w) {
@@ -4470,15 +4475,36 @@
     ctx.fillText(String(hp), pad2, by - 10);
     ctx.font = '500 9px "IBM Plex Mono", monospace';
     ctx.fillStyle = 'rgba(198,212,227,.6)';
-    var kit = 'STIM ' + L.meds + '  FRAG ' + L.nades + '  SMOKE ' + L.smokes;
+    // kit, with this player's own buttons for each
+    var onPad = usingPad(L);
+    var kit = (onPad ? 'Y' : 'F') + ' STIM ' + L.meds + '   ' +
+              (onPad ? '\u25c0' : 'G') + ' FRAG ' + L.nades + '   ' +
+              (onPad ? '\u25b6' : 'H') + ' SMOKE ' + L.smokes;
     ctx.fillText(kit, pad2, by + 2);
 
     // weapon, bottom right
     var w = curW(L), sl = curSlot(L);
+    // both guns: two chips, the one in hand lit, labelled with how to swap
+    ctx.font = '600 9px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'center';
+    var chipX = VW - pad2;
+    for (var ci = 1; ci >= 0; ci--) {
+      var cs = L.slots[ci], cname = cs ? WEAPONS[cs.key].name : '\u2014';
+      var clabel = onPad ? (ci === 0 ? 'LB ' + cname : cname + ' RB') : (ci + 1) + ' ' + cname;
+      var cwid = ctx.measureText(clabel).width + 14, on = cs && L.slot === ci;
+      chipX -= cwid;
+      ctx.fillStyle = 'rgba(10,15,22,.7)';
+      ctx.fillRect(chipX, by - 48, cwid, 16);
+      ctx.strokeStyle = on ? '#7ce7d8' : 'rgba(44,61,82,.9)'; ctx.lineWidth = 1;
+      ctx.strokeRect(chipX + 0.5, by - 47.5, cwid - 1, 15);
+      ctx.fillStyle = on ? '#7ce7d8' : 'rgba(198,212,227,.6)';
+      ctx.fillText(clabel, chipX + cwid / 2, by - 39.5);
+      chipX -= 4;
+    }
     ctx.textAlign = 'right';
     ctx.font = '500 9px "IBM Plex Mono", monospace';
     ctx.fillStyle = 'rgba(198,212,227,.6)';
-    ctx.fillText(w ? w.name : 'UNARMED', VW - pad2, by - 30);
+    ctx.fillText(w ? w.name : 'UNARMED', VW - pad2, by - 26);
     ctx.font = '700 24px "Chakra Petch", sans-serif';
     ctx.fillStyle = w && sl.ammo <= 0 ? '#ff4d8d' : '#c6d4e3';
     var res = L.reserve >= 9000 ? '\u221e' : String(L.reserve);
@@ -5010,7 +5036,7 @@
     ctx.strokeRect(bx + .5, by + .5, boxW - 1, boxH - 1);
     ctx.fillStyle = '#7ce7d8';
     ctx.textBaseline = 'middle';
-    ctx.fillText(promptKey('E', 'A'), bx + 14, by + boxH / 2 + 1);
+    ctx.fillText(promptKey('E', 'X'), bx + 14, by + boxH / 2 + 1);
     ctx.fillStyle = '#c6d4e3';
     ctx.fillText(label, bx + 36, by + boxH / 2 + 1);
   }
@@ -5814,7 +5840,8 @@
     else if (e.code === 'Digit2' || e.code === 'Numpad2') k = '2';
     if (netRole && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden) { e.preventDefault(); openIgChat(); return; }
     if (netGuest && state === 'play') {
-      var GB = { 'e': 0, ' ': 0, 'v': 1, 'x': 1, 'r': 2, 'f': 3, 'h': 5, 'g': 6, 'q': 14, '1': 14, '2': 14, 'z': 13 };
+      var GB = { 'e': PAD.pickup, ' ': PAD.jump, 'v': PAD.melee, 'x': PAD.giveup, 'r': PAD.reload, 'f': PAD.stim,
+                 'h': PAD.smoke, 'g': PAD.frag, 'q': PAD.swapL, '1': PAD.swapL, '2': PAD.swapL, 'z': PAD.drop };
       if (k === 'escape') { if (settingsOpenFromPause()) $('setBack').click(); else if (netGuestPaused) resume(); else pause(); }
       else if (GB[k] !== undefined && !netGuestPaused && !e.repeat) guestHits |= 1 << GB[k];
       if (['w', 'a', 's', 'd', ' '].indexOf(k) >= 0) e.preventDefault();
@@ -6739,10 +6766,10 @@
         if (rm >= dz) guestStickAt = performance.now();
         if (rm >= dz + 0.1) aim = Math.atan2(ry, rx);
         else if (performance.now() - guestStickAt < 600) aim = player.ang;   // keep it where it was
-        var PB = [0, 1, 2, 3, 5, 6, 14, 15, 12, 13];
-        for (i = 0; i < PB.length; i++) if (padHit(PB[i])) hitsNow |= 1 << (PB[i] === 15 ? 14 : (PB[i] === 12 ? 3 : PB[i]));
-        if (padHit(9)) pause();
-        if (padDown(4)) down |= 1 << 4;
+        var PB = [PAD.reload, PAD.drop, PAD.pickup, PAD.stim, PAD.swapL, PAD.swapR, PAD.melee, PAD.melee2, PAD.frag, PAD.smoke];
+        for (i = 0; i < PB.length; i++) if (padHit(PB[i])) hitsNow |= 1 << PB[i];
+        if (padHit(PAD.pause)) pause();
+        if (padDown(PAD.sprint)) down |= 1 << PAD.sprint;
         if (padDown(7)) down |= 1 << 7;
       }
       if (!mx && !my) {
@@ -6752,7 +6779,7 @@
         if (ml > 1) { mx /= ml; my /= ml; }
       }
       if (aim === null && !padActive()) aim = Math.atan2(mouse.wy - player.y, mouse.wx - player.x);
-      if (keys['shift']) down |= 1 << 4;
+      if (keys['shift']) down |= 1 << PAD.sprint;
       if (mouse.down) down |= 1 << 7;
       if ((down & (1 << 7)) && !guestTrig) hitsNow |= 1 << 7;
       guestTrig = !!(down & (1 << 7));
