@@ -1618,7 +1618,7 @@
     dmgMarks = []; shake = 0; promptItem = null;
     alive = MODE.field; matchTime = 0; shots = 0; hits = 0; kills = 0;
     score = [0, 0]; round = 1; roundBreak = 0; roundClock = 75;
-    result = null; overCause = ''; lastWinner = null; killcam = null;
+    result = null; overCause = ''; lastWinner = null;
 
     if (MODE.zone) {
       var span = Math.min(WORLD_W, WORLD_H);
@@ -2583,10 +2583,11 @@
       var kgw = curW(kcK);
       netEv.push(['c', e.id, kcK.id, kgw ? kgw.name : 'BARE HANDS', Math.max(0, Math.round(kcK.hp)), Math.round(dist(e, kcK))]);
     }
-    // you were killed by someone: the camera goes to them for a moment
-    if (e === player && kcK && !splitOn && !netGuest && mode !== 'tut') {
+    // someone playing on this machine was killed: their camera goes to the
+    // killer for a moment (each split-screen player gets their own)
+    if (onHere(e) && kcK && !netGuest && mode !== 'tut') {
       var kw = curW(kcK);
-      killcam = { k: kcK, victim: e, t: 0, dur: 3.2, after: null,
+      e.kc = { k: kcK, victim: e, t: 0, dur: 3.2, after: null,
                   gun: kw ? kw.name : 'BARE HANDS', hp: Math.max(0, Math.round(kcK.hp)), d: Math.round(dist(e, kcK)) };
     }
     if (killer && killer !== e) killer.kills++;
@@ -2717,21 +2718,22 @@
     if (!lastWinner) return false;
     return lastWinner === e || (squad > 1 && lastWinner.team === e.team);
   }
-  var killcam = null;
   function finishAfterCam(e, won, msg, place) {
-    if (killcam && killcam.victim === e) { killcam.after = [won, msg, place]; return; }
+    if (e.kc) { e.kc.after = [won, msg, place]; return; }
     finish(won, msg, place);
   }
   function killcamTick(dt) {
-    if (!killcam) return;
-    killcam.t += dt;
-    // over when it has run, or the moment you are back on your feet
-    var done = killcam.t >= killcam.dur || (player.alive && killcam.t > 0.4);
-    if (!killcam.k.alive && killcam.t > 1.4) done = true;              // they died too
-    if (!done) return;
-    var aft = killcam.after;
-    killcam = null;
-    if (aft && state === 'play') finish(aft[0], aft[1], aft[2]);
+    for (var i = 0; i < locals.length; i++) {
+      var L = locals[i], kc = L.kc;
+      if (!kc) continue;
+      kc.t += dt;
+      // over when it has run, or the moment they are back on their feet
+      var done = kc.t >= kc.dur || (L.alive && kc.t > 0.4);
+      if (!kc.k.alive && kc.t > 1.4) done = true;                   // the killer died too
+      if (!done) continue;
+      L.kc = null;
+      if (kc.after && state === 'play') finish(kc.after[0], kc.after[1], kc.after[2]);
+    }
   }
   function finish(won, msg, place) {
     cgGame('gameplayStop');
@@ -3729,9 +3731,9 @@
     var lerp = 1 - Math.pow(0.0001, dt);
     for (var li = 0; li < locals.length; li++) {
       var L = locals[li], lc = L.cam || cam;
-      if (killcam && L === player) {
+      if (L.kc) {
         var kl = 1 - Math.pow(0.015, dt);
-        lc.x += (killcam.k.x - lc.x) * kl; lc.y += (killcam.k.y - lc.y) * kl;
+        lc.x += (L.kc.k.x - lc.x) * kl; lc.y += (L.kc.k.y - lc.y) * kl;
         continue;
       }
       // The camera is pinned to you; only the look-ahead toward the cursor
@@ -4180,7 +4182,7 @@
       var k = ents[from], v = victim === undefined ? player : ents[victim];
       if (!k || !v) return false;
       damage(v, amount, from, Math.atan2(v.y - k.y, v.x - k.x));
-      return { alive: v.alive, killcam: !!killcam };
+      return { alive: v.alive, killcam: !!v.kc };
     },
     // poster art: draw one of the game's characters onto any canvas
     posterChar: function (c2, o) {
@@ -4344,12 +4346,12 @@
     if (!splitOn) {
       VX = 0; VY = 0; VW = cw; VH = ch;
       player.viewX = 0; player.viewY = 0; player.viewW = cw; player.viewH = ch; player.zoom = zoom;
-      if (killcam) {
+      if (player.kc) {
         // see the world as the one who got you saw it
-        var me = player;
-        player = killcam.k; noOverlay = true;
+        var me = player, kc0 = player.kc;
+        player = kc0.k; noOverlay = true;
         try { renderScene(); } finally { player = me; noOverlay = false; }
-        renderKillcam();
+        renderKillcam(kc0);
         return;
       }
       renderScene();
@@ -4371,7 +4373,13 @@
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.beginPath(); ctx.rect(VX, VY, VW, VH); ctx.clip();
-      renderScene();
+      if (L.kc) {
+        // this player's own kill cam, in their half
+        var kcS = L.kc;
+        player = kcS.k; noOverlay = true;
+        try { renderScene(); } finally { player = L; noOverlay = false; }
+        renderKillcam(kcS);
+      } else renderScene();
       drawSplitHud(L);
       ctx.restore();
     }
@@ -4409,7 +4417,7 @@
       ctx.font = '400 22px "Russo One", "Chakra Petch", sans-serif';
       ctx.fillStyle = '#f1e7d0';
       var msg = L.respawnT > 0 ? 'RESPAWNING ' + Math.ceil(L.respawnT) : 'OUT';
-      ctx.fillText(msg, VW / 2, VH / 2);
+      if (!L.kc) ctx.fillText(msg, VW / 2, VH / 2);          // the kill cam says it instead
       ctx.restore();
       return;
     }
@@ -5185,9 +5193,9 @@
     ctx.restore();
   }
 
-  function renderKillcam() {
-    var kc = killcam, k = kc.k;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  function renderKillcam(kc) {
+    var k = kc.k;
+    ctx.setTransform(dpr, 0, 0, dpr, dpr * VX, dpr * VY);
     ctx.save();
     var ease = Math.min(1, kc.t / 0.35);
     // letterbox bars and a red edge
@@ -5221,7 +5229,7 @@
     ctx.fillStyle = '#f1e7d0'; ctx.fillText(line, cw / 2, ty + 36);
     // what happens next
     var nxt = kc.after ? 'RESULTS IN ' + Math.max(1, Math.ceil(kc.dur - kc.t))
-            : (player.respawnT > 0 ? 'RESPAWN IN ' + Math.ceil(player.respawnT) : '');
+            : (kc.victim.respawnT > 0 ? 'RESPAWN IN ' + Math.ceil(kc.victim.respawnT) : '');
     if (nxt) {
       ctx.font = '500 11px "IBM Plex Mono", monospace';
       ctx.fillStyle = 'rgba(241,231,208,.7)';
@@ -5964,7 +5972,7 @@
 
   function goHome() {
     cgGame('gameplayStop');
-    killcam = null;
+    for (var kq = 0; kq < locals.length; kq++) locals[kq].kc = null;
     netGuest = false; netGuestPaused = false;
     if (tutRestore) { mode = tutRestore.mode; mapKind = tutRestore.mapKind; blackout = tutRestore.blackout; squad = tutRestore.squad; tutRestore = null; MODE = MODES[mode]; }
     setTimeout(syncMenu, 0);
@@ -6520,7 +6528,7 @@
     decals = []; impacts = []; deaths = []; nades = []; flags = []; smokes = []; sectors = [];
     drops = []; splats = [];
     dmgMarks = []; shake = 0; promptItem = null; zone = null; plane = null;
-    locals = []; splitOn = false; player = null; guestYou = m.you; netQueue = []; killcam = null;
+    locals = []; splitOn = false; player = null; guestYou = m.you; netQueue = [];
     kills = 0; shots = 0; hits = 0; matchTime = 0; score = [0, 0]; result = null;
     charCache = {};
     elFeed.innerHTML = '';
@@ -6610,7 +6618,7 @@
       else if (q[0] === 'f') feed(q[1], q[2]);
       else if (q[0] === 'g') bleed(q[1], q[2], q[3], q[4], !!q[5], q[6]);
       else if (q[0] === 'c' && q[1] === guestYou && ents[q[2]]) {
-        killcam = { k: ents[q[2]], victim: player, t: 0, dur: 3.2, after: null, gun: q[3], hp: q[4], d: q[5] };
+        if (player) player.kc = { k: ents[q[2]], victim: player, t: 0, dur: 3.2, after: null, gun: q[3], hp: q[4], d: q[5] };
       }
     }
   }
@@ -6651,9 +6659,9 @@
     player.leadX = (player.leadX || 0) + (glx - (player.leadX || 0)) * lerp;
     player.leadY = (player.leadY || 0) + (gly - (player.leadY || 0)) * lerp;
     killcamTick(dt);
-    if (killcam) {
+    if (player.kc) {
       var gk = 1 - Math.pow(0.015, dt);
-      cam.x += (killcam.k.x - cam.x) * gk; cam.y += (killcam.k.y - cam.y) * gk;
+      cam.x += (player.kc.k.x - cam.x) * gk; cam.y += (player.kc.k.y - cam.y) * gk;
     } else {
       cam.x = player.x + player.leadX; cam.y = player.y + player.leadY;
     }
