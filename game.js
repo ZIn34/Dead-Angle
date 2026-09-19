@@ -3966,6 +3966,31 @@
       return window.EARSHOT.net();
     },
     queueTest: function () { goPublicHost(); },
+    // poster art: draw one of the game's characters onto any canvas
+    posterChar: function (c2, o) {
+      if (!PACK_READY) return false;
+      var keep = ctx;
+      ctx = c2;
+      try {
+        drawPacked({ x: o.x, y: o.y, ang: o.ang, skin: o.skin, r: o.r || 8.5, id: o.id || 1,
+                     slots: [o.gun ? { key: o.gun, ammo: 1 } : null, null], slot: 0,
+                     moving: !!o.moving, animT: o.animT || 0, animFire: o.fire || 0,
+                     swingT: 0, throwT: 0, team: 0, alive: true });
+      } finally { ctx = keep; }
+      return true;
+    },
+    posterFloor: function () { return PACK_IMG.floor || null; },
+    // screenshot tool (marketing images): freeze, look through someone's eyes
+    // with a wider light, and hide the markers
+    photo: function (id, reach) {
+      var e = ents[id];
+      if (!e) return false;
+      state = 'paused';
+      player = e; cam.x = e.x; cam.y = e.y;
+      VIEW_R = reach || VIEW_R;
+      noOverlay = true;
+      return true;
+    },
     uiStep: function (dt) { uiPad(dt || 0.05); if (netRole === 'host') netHostTick(dt || 0.05); return document.activeElement ? (document.activeElement.id || document.activeElement.textContent.trim().slice(0, 24)) : null; },
     tutInfo: function () {
       return { step: tut.i, item: tut.item && loot.indexOf(tut.item) >= 0 ? [Math.round(tut.item.x), Math.round(tut.item.y)] : null };
@@ -4003,7 +4028,7 @@
       return ents.filter(function (e) { return e.bot; }).map(function (e) {
         var sl = curSlot(e);
         var t = e.target, td = t ? dist(e, t) : 0;
-        return { n: e.name, x: Math.round(e.x), y: Math.round(e.y), alive: e.alive, team: e.team, gun: sl ? sl.key : null,
+        return { id: e.id, n: e.name, x: Math.round(e.x), y: Math.round(e.y), alive: e.alive, team: e.team, gun: sl ? sl.key : null,
                  mag: sl ? sl.ammo : 0, reserve: e.reserve, reloading: e.reloadT > 0,
                  hasTarget: !!t, react: +e.reactT.toFixed(2), lost: +e.lostT.toFixed(2),
                  dist: Math.round(td), inSight: t ? sightClear(e.x, e.y, t.x, t.y) : false,
@@ -4660,6 +4685,7 @@
   // out in front - at half a screen, or on the first wall in the way.
   var cursorHidden = null;
   function renderReticle() {
+    if (noOverlay) return;
     var on = usingPad(player);
     var hideC = splitOn ? usingPad(kbPlayer()) : on;
     if (cursorHidden !== hideC) {
@@ -4692,6 +4718,7 @@
   }
 
   function renderPrompt() {
+    if (noOverlay) return;
     if (!promptItem || !player.alive) return;
     var w = WEAPONS[promptItem.key];
     var label = w.name + '  \u00b7  ' + w.snd.maxR + ' u';
@@ -4713,8 +4740,9 @@
 
   // Squadmates are the one thing the dark does not hide - you would be on
   // comms with them. Enemies stay unmarked.
+  var noOverlay = false;            // screenshot tool: world only, no markers
   function renderAllies() {
-    if (!player.alive) return;
+    if (noOverlay || !player.alive) return;
     var mates = [];
     for (var i = 0; i < ents.length; i++) {
       var a = ents[i];
@@ -5068,6 +5096,7 @@
   }
 
   function renderDamage() {
+    if (noOverlay) return;
     for (var i = 0; i < dmgMarks.length; i++) {
       var m = dmgMarks[i];
       if (m.who !== undefined && m.who !== player.id) continue;
