@@ -144,6 +144,14 @@ h1 .gold{color:var(--gold)}
 .oskk.done{background:var(--gold);color:var(--out)}
 .oskk:focus{outline:3px solid var(--gold);outline-offset:1px}
 @media (max-width:480px){.oskk{min-width:28px;height:36px;padding:0 4px;font-size:12px}.oskrow{gap:4px}}
+.chatlog{width:100%;max-width:460px;height:min(46vh,340px);overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--navy-d);border:3px solid var(--out);box-shadow:4px 4px 0 rgba(0,0,0,.45);text-align:left}
+.cmsg{align-self:flex-start;max-width:80%;padding:7px 10px;background:var(--navy);border:2px solid var(--out);border-radius:4px;font-family:var(--font-m);font-size:12px;color:var(--paper);word-break:break-word}
+.cmsg b{display:block;font-size:9px;letter-spacing:.16em;color:var(--khaki);margin-bottom:2px}
+.cmsg.me{align-self:flex-end;background:#4a4326}
+.cmsg.me b{color:var(--gold)}
+.cmsg.sys{align-self:center;background:transparent;border:0;color:var(--khaki)}
+.joinrow input.chatin{width:min(300px,60vw);text-align:left;letter-spacing:.04em;text-transform:none}
+.frow .fhint{font-size:8px;color:var(--khaki)}
 .ptitle{margin:0;font-family:var(--font-x);font-weight:400;font-size:clamp(32px,8.5vw,50px);letter-spacing:.14em;text-indent:.14em;line-height:1;color:var(--paper);-webkit-text-stroke:2px var(--out);paint-order:stroke fill;text-shadow:4px 4px 0 var(--out)}
 .pbtns{display:flex;flex-direction:column;align-items:center;gap:16px}
 .setlist{width:100%;max-width:440px;display:flex;flex-direction:column;gap:2px;background:var(--out);border:3px solid var(--out);box-shadow:4px 4px 0 rgba(0,0,0,.45)}
@@ -384,6 +392,22 @@ h1 .gold{color:var(--gold)}
       <div class="pbtns">
         <button class="go ghost" id="friendsBack" type="button">BACK</button>
       </div>
+    </div>
+  </div>
+
+  <div class="screen" id="chat" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h2 class="ptitle sm">CHAT &middot; <span id="chatName"></span></h2>
+        <div class="rule"></div>
+      </div>
+      <div class="chatlog" id="chatLog"></div>
+      <div class="joinrow">
+        <input class="wide chatin" id="chatInput" maxlength="200" placeholder="MESSAGE" autocomplete="off" aria-label="Message">
+        <button class="go" id="chatSend" type="button">SEND</button>
+      </div>
+      <p class="modedesc" id="chatStatus"></p>
+      <button class="go ghost" id="chatBack" type="button">BACK</button>
     </div>
   </div>
 

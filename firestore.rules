@@ -2,6 +2,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // chats are keyed "uidA_uidB" (sorted); only those two are members
+    function isMember(pair) {
+      return request.auth != null && request.auth.uid in pair.split('_');
+    }
+    function otherOf(pair) {
+      return pair.split('_')[0] == request.auth.uid ? pair.split('_')[1] : pair.split('_')[0];
+    }
+    // both have added each other
+    function mutual(pair) {
+      return request.auth.uid in get(/databases/$(database)/documents/users/$(otherOf(pair))).data.friends
+          && otherOf(pair) in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.friends;
+    }
+
     // username -> account. Anyone can check if a name is taken; a name can be
     // claimed once, by the account it points to, and never changed.
     match /usernames/{name} {
@@ -35,6 +48,19 @@ service cloud.firestore {
       allow update: if request.auth != null && resource.data.host == request.auth.uid
                     && request.resource.data.host == request.auth.uid;
       allow delete: if request.auth != null && resource.data.host == request.auth.uid;
+    }
+
+    // friend chat: only the two people in it can read it; only mutual
+    // friends can write, as themselves, up to 200 characters. Messages
+    // cannot be edited or deleted after sending.
+    match /chats/{pair}/msgs/{msg} {
+      allow read: if isMember(pair);
+      allow create: if isMember(pair) && mutual(pair)
+                    && request.resource.data.from == request.auth.uid
+                    && request.resource.data.text is string
+                    && request.resource.data.text.size() > 0
+                    && request.resource.data.text.size() <= 200;
+      allow update, delete: if false;
     }
   }
 }

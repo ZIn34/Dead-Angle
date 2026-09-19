@@ -1709,6 +1709,7 @@
     elFeed.innerHTML = '';
     elMenu.hidden = true; elOver.hidden = true; elHud.hidden = false; elPaused.hidden = true;
     $('online').hidden = true; $('account').hidden = true; $('friends').hidden = true;
+    if ($('chat') && !$('chat').hidden) closeChat(), $('friends').hidden = true;
     state = 'play';
     syncHud();
     if (netRole === 'host') for (var gs = 0; gs < netGuests.length; gs++) if (netGuests[gs].ent) netSendTo(netGuests[gs], startMsg(netGuests[gs]));
@@ -5138,7 +5139,7 @@
   // screen - down goes to the next row, not the next button along.
   var uiScr = null, uiRepeat = 0;
   function uiScreen() {
-    var ids = ['osk', 'account', 'friends', 'online', 'paused', 'over', 'settings', 'shop', 'menu'];
+    var ids = ['osk', 'account', 'chat', 'friends', 'online', 'paused', 'over', 'settings', 'shop', 'menu'];
     for (var i = 0; i < ids.length; i++) {
       var el = $(ids[i]);
       if (el && !el.hidden) return el;
@@ -5183,6 +5184,7 @@
     if (!$('osk').hidden) { oskKey('BACK'); return; }
     if (!$('inviteToast').hidden && document.activeElement && $('inviteToast').contains(document.activeElement)) { answerInvite(false); return; }
     if (!$('account').hidden) $('acctBack').click();
+    else if (!$('chat').hidden) $('chatBack').click();
     else if (!$('friends').hidden) $('friendsBack').click();
     else if (!$('online').hidden) $('netBack').click();
     else if (!$('paused').hidden) resume();
@@ -5255,7 +5257,7 @@
     });
     var r2 = document.createElement('div');
     r2.className = 'oskrow';
-    [['SHIFT', 'abc'], ['BACK', '\u232b DELETE'], ['DONE', 'DONE']].forEach(function (p) {
+    [['SHIFT', 'abc'], [' ', 'SPACE'], ['BACK', '\u232b DELETE'], ['DONE', 'DONE']].forEach(function (p) {
       var b = document.createElement('button');
       b.type = 'button'; b.className = 'oskk wide' + (p[0] === 'DONE' ? ' done' : '');
       b.setAttribute('data-k', p[0]);
@@ -6047,7 +6049,7 @@
     kills = 0; shots = 0; hits = 0; matchTime = 0; score = [0, 0]; result = null;
     charCache = {};
     elFeed.innerHTML = '';
-    ['menu', 'over', 'paused', 'shop', 'settings', 'online', 'friends', 'account'].forEach(function (id) { $(id).hidden = true; });
+    ['menu', 'over', 'paused', 'shop', 'settings', 'online', 'friends', 'account', 'chat'].forEach(function (id) { $(id).hidden = true; });
     elHud.hidden = false; elHud.classList.remove('split');
     netGuest = true; netGuestPaused = false;
     state = 'play';
@@ -6290,6 +6292,7 @@
   function readCreds() {
     var nm = $('acctUser').value.trim(), pw = $('acctPass').value;
     if (!/^[A-Za-z0-9_]{3,16}$/.test(nm)) { acctStatus('Usernames are 3-16 letters, numbers or _.'); return null; }
+    if (rude(nm)) { acctStatus('Pick a different username.'); return null; }
     if (pw.length < 6) { acctStatus('Passwords need at least 6 characters.'); return null; }
     return { name: nm, lower: nm.toLowerCase(), pass: pw };
   }
@@ -6362,6 +6365,7 @@
       fbBeatT = setInterval(heartbeat, 30000);
       listenInvites();
       renderFriends();
+      primeFriends();
     }).catch(function (err) { acctStatus(errText(err)); renderAcct(); });
   }
 
@@ -6430,6 +6434,7 @@
     Promise.all(fbFriends.map(function (uid) {
       return fbDb.collection('users').doc(uid).get().then(function (d) { var v = d.exists ? d.data() : null; if (v) v.uid = uid; return v; }, function () { return null; });
     })).then(function (list) {
+      fbFriendDocs = list.filter(Boolean);
       el.innerHTML = '';
       var now = Date.now();
       list.filter(Boolean).sort(function (a, b) { return (b.lastSeen || 0) - (a.lastSeen || 0); }).forEach(function (f) {
@@ -6442,6 +6447,18 @@
         var st = document.createElement('em');
         st.textContent = online ? (f.party ? (f.partyHost ? 'HOSTING A PARTY' : 'IN A PARTY') : 'ONLINE') : 'OFFLINE';
         row.appendChild(nm); row.appendChild(st);
+        // chat, only once you have added each other
+        if ((f.friends || []).indexOf(fbUser.uid) >= 0) {
+          var cb = document.createElement('button');
+          cb.className = 'tgl' + (chatUnread[f.uid] ? ' on' : ''); cb.type = 'button';
+          cb.textContent = chatUnread[f.uid] ? 'CHAT \u2022 NEW' : 'CHAT';
+          cb.addEventListener('click', function () { openChat(f); });
+          row.appendChild(cb);
+        } else {
+          var hint = document.createElement('em');
+          hint.className = 'fhint'; hint.textContent = 'ADD EACH OTHER TO CHAT';
+          row.appendChild(hint);
+        }
         if (online && f.partyHost && f.party && f.party !== netCode) {
           var jb = document.createElement('button');
           jb.className = 'tgl on'; jb.type = 'button'; jb.textContent = 'JOIN';
@@ -6461,6 +6478,116 @@
         el.appendChild(row);
       });
     });
+  }
+
+  // ---- chat ----
+  // A plain word filter. It will not catch everything, but it keeps the
+  // obvious stuff out of names and messages.
+  var RUDE = ['fuck', 'shit', 'bitch', 'cunt', 'dick', 'pussy', 'cock', 'whore', 'slut', 'bastard',
+              'asshole', 'nigg', 'fag', 'retard', 'rape', 'nazi', 'kys', 'penis', 'vagina', 'porn', 'sex'];
+  function squash(t) {
+    return String(t).toLowerCase().replace(/[@4]/g, 'a').replace(/3/g, 'e').replace(/[1!|]/g, 'i')
+      .replace(/0/g, 'o').replace(/[5$]/g, 's').replace(/7/g, 't').replace(/[^a-z]/g, '');
+  }
+  function rude(t) {
+    var q = squash(t);
+    for (var i = 0; i < RUDE.length; i++) if (q.indexOf(RUDE[i]) >= 0) return true;
+    return false;
+  }
+  function clean(t) {
+    return String(t).split(/(\s+)/).map(function (w) { return rude(w) ? w.replace(/[^\s]/g, '*') : w; }).join('');
+  }
+
+  var fbFriendDocs = [], chatWith = null, chatUnsub = null, chatUnread = {};
+  function pairId(a, b) { return a < b ? a + '_' + b : b + '_' + a; }
+  function chatSeen(uid, at) {
+    try {
+      var m = JSON.parse(localStorage.getItem('earshot.chatSeen') || '{}');
+      if (at === undefined) return m[uid] || 0;
+      m[uid] = at; localStorage.setItem('earshot.chatSeen', JSON.stringify(m));
+    } catch (err) {}
+    return 0;
+  }
+  function openChat(f) {
+    if (!fbUser) return;
+    chatWith = f;
+    ['friends', 'menu'].forEach(function (id) { $(id).hidden = true; });
+    $('chat').hidden = false;
+    $('chatName').textContent = f.name;
+    $('chatLog').innerHTML = '<div class="cmsg sys">Loading...</div>';
+    $('chatStatus').textContent = '';
+    if (chatUnsub) chatUnsub();
+    chatUnsub = fbDb.collection('chats').doc(pairId(fbUser.uid, f.uid)).collection('msgs')
+      .orderBy('at', 'desc').limit(60).onSnapshot(function (qs) {
+        var msgs = [];
+        qs.forEach(function (d) { msgs.push(d.data()); });
+        msgs.reverse();
+        var log = $('chatLog');
+        log.innerHTML = '';
+        if (!msgs.length) log.innerHTML = '<div class="cmsg sys">No messages yet. Say hi!</div>';
+        msgs.forEach(function (m) {
+          var d = document.createElement('div');
+          d.className = 'cmsg' + (m.from === fbUser.uid ? ' me' : '');
+          var who = document.createElement('b');
+          who.textContent = m.from === fbUser.uid ? acctName : f.name;
+          var tx = document.createElement('span');
+          tx.textContent = clean(m.text || '');
+          d.appendChild(who); d.appendChild(tx);
+          log.appendChild(d);
+        });
+        log.scrollTop = log.scrollHeight;
+        if (msgs.length) chatSeen(f.uid, msgs[msgs.length - 1].at || Date.now());
+        chatUnread[f.uid] = false;
+        syncChatBadge();
+      }, function (err) { $('chatStatus').textContent = errText(err); });
+  }
+  function closeChat() {
+    if (chatUnsub) { chatUnsub(); chatUnsub = null; }
+    chatWith = null;
+    $('chat').hidden = true;
+    $('friends').hidden = false;
+    renderFriends();
+  }
+  function sendChat() {
+    var inp = $('chatInput'), text = inp.value.trim();
+    if (!text || !chatWith || !fbUser) return;
+    if (text.length > 200) text = text.slice(0, 200);
+    inp.value = '';
+    fbDb.collection('chats').doc(pairId(fbUser.uid, chatWith.uid)).collection('msgs').add({
+      from: fbUser.uid, text: clean(text), at: Date.now()
+    }).catch(function (err) {
+      $('chatStatus').textContent = err && err.code === 'permission-denied'
+        ? 'You can only chat once you have both added each other.' : errText(err);
+    });
+  }
+  // a gentle "new message" mark on the FRIENDS button
+  function syncChatBadge() {
+    var any = false;
+    for (var k in chatUnread) if (chatUnread[k]) any = true;
+    var b = $('friendsBtn');
+    if (b) b.textContent = any ? 'FRIENDS \u2022 NEW MESSAGE' : 'FRIENDS';
+  }
+  function checkUnread() {
+    if (!fbUser || !fbDb || state === 'play') return;
+    var mutual = fbFriendDocs.filter(function (f) { return (f.friends || []).indexOf(fbUser.uid) >= 0; });
+    mutual.forEach(function (f) {
+      if (chatWith && chatWith.uid === f.uid) return;
+      fbDb.collection('chats').doc(pairId(fbUser.uid, f.uid)).collection('msgs').orderBy('at', 'desc').limit(1).get()
+        .then(function (qs) {
+          var last = null;
+          qs.forEach(function (d) { last = d.data(); });
+          chatUnread[f.uid] = !!(last && last.from !== fbUser.uid && (last.at || 0) > chatSeen(f.uid));
+          syncChatBadge();
+        }, function () {});
+    });
+  }
+  setInterval(checkUnread, 30000);
+  // after logging in, learn who your friends are so the badge can work
+  function primeFriends() {
+    if (!fbUser || !fbFriends.length) return;
+    Promise.all(fbFriends.map(function (uid) {
+      return fbDb.collection('users').doc(uid).get().then(function (d) { var v = d.exists ? d.data() : null; if (v) v.uid = uid; return v; }, function () { return null; });
+    })).then(function (list) { fbFriendDocs = list.filter(Boolean); checkUnread(); });
   }
 
   // ---- invites ----
@@ -6585,6 +6712,12 @@
   $('acctBack').addEventListener('click', closeAccount);
   $('quickBtn').addEventListener('click', quickPlay);
   $('friendAdd').addEventListener('click', addFriend);
+  $('chatSend').addEventListener('click', sendChat);
+  $('chatBack').addEventListener('click', closeChat);
+  $('chatInput').addEventListener('keydown', function (ev) {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') sendChat();
+  });
   $('friendsBtn').addEventListener('click', openFriends);
   $('friendsBack').addEventListener('click', function () { $('friends').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('friendsNeed').addEventListener('click', function () { openAccount(''); });
