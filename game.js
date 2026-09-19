@@ -2250,6 +2250,10 @@
         // home with it? only counts if your own flag is on its stand
         var own = flags[f.carrier.team];
         var d = Math.sqrt((f.carrier.x - own.hx) * (f.carrier.x - own.hx) + (f.carrier.y - own.hy) * (f.carrier.y - own.hy));
+        if (d < 34 && !(own.home && !own.carrier) && f.carrier.local && (f.warnT || 0) <= matchTime) {
+          f.warnT = matchTime + 4;
+          feed('<b>CANNOT SCORE YET</b> - your flag has to be back on its stand', true);
+        }
         if (d < 34 && own.home && !own.carrier) {
           score[f.carrier.team]++;
           var mine = f.carrier.team === player.team;
@@ -4879,7 +4883,40 @@
     ctx.restore();
   }
 
+  // Capture the flag: tell the carrier exactly what has to happen next.
+  function renderFlagHint() {
+    if (!MODE.ctf || !player.alive || !flags.length) return;
+    var carrying = null;
+    for (var i = 0; i < flags.length; i++) if (flags[i].carrier === player) carrying = flags[i];
+    var own = flags[player.team];
+    if (!carrying && (!own || own.home)) return;
+    var txt, sub2;
+    if (carrying) {
+      if (own.home && !own.carrier) { txt = 'RUN IT HOME'; sub2 = 'Get to your flag stand to score'; }
+      else { txt = 'YOUR FLAG IS TAKEN'; sub2 = 'It has to be back on your stand before you can score - hold on, or get it back'; }
+    } else {
+      txt = own.carrier ? 'THEY HAVE YOUR FLAG' : 'YOUR FLAG IS DOWN';
+      sub2 = own.carrier ? 'Kill the carrier to drop it' : 'Touch it to send it home';
+    }
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '400 16px "Russo One", "Chakra Petch", sans-serif';
+    var tw = ctx.measureText(txt).width + 36, bx = cw / 2 - tw / 2, by = ch * 0.2;
+    var warn = carrying && !(own.home && !own.carrier);
+    ctx.fillStyle = warn || !carrying ? '#ff4d8d' : '#f2bd1d';
+    ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 3;
+    ctx.fillRect(bx, by, tw, 32); ctx.strokeRect(bx, by, tw, 32);
+    ctx.fillStyle = '#0d0f12';
+    ctx.fillText(txt, cw / 2, by + 17);
+    ctx.font = '500 10px "IBM Plex Mono", monospace';
+    ctx.fillStyle = '#f1e7d0';
+    ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 3;
+    ctx.strokeText(sub2, cw / 2, by + 46); ctx.fillText(sub2, cw / 2, by + 46);
+    ctx.restore();
+  }
+
   function renderDropHint() {
+    renderFlagHint();
     if (!player.alive || !player.air) return;
     var txt, sub2 = null;
     if (player.air === 'plane') {
