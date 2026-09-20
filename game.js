@@ -1437,12 +1437,16 @@
     e.reloadT = 0;
     if (e === player) { feed('picked up <b>' + WEAPONS[it.key].name + '</b>', true); audioEmit(e.x, e.y, PICK_SND, e.id); }
   }
+  // you cannot scoop up what you dropped a moment ago
+  function heldBack(e, it) { return it.holdBy === e.id && it.hold > performance.now(); }
+  function markDropped(e, it) { it.holdBy = e.id; it.hold = performance.now() + 2500; return it; }
   function autoPickup(e) {
     if (isZombie(e)) return;                  // the infected carry nothing
     for (var i = loot.length - 1; i >= 0; i--) {
       var it = loot[i];
       var dx = it.x - e.x, dy = it.y - e.y;
       if (dx * dx + dy * dy > 22 * 22) continue;
+      if (heldBack(e, it)) continue;
       if (it.type === 'ammo') {
         if (e.reserve < RESERVE_MAX) { e.reserve = Math.min(RESERVE_MAX, e.reserve + it.n); loot.splice(i, 1); if (e === player) audioEmit(e.x, e.y, PICK_SND, e.id); }
       } else if (it.type === 'med') {
@@ -1593,7 +1597,7 @@
     e.x = tile.x * TILE + TILE / 2; e.y = tile.y * TILE + TILE / 2;
     e.px = e.x; e.py = e.y; e.vx = 0; e.vy = 0;
     e.hp = (MODE.zombies && e.team === 1) ? 38 : 100;
-    e.alive = true; e.respawnT = 0; e.bleeding = false;
+    e.alive = true; e.respawnT = 0; e.bleeding = false; e.pendEnd = null; e.spec = null;
     e.fireT = 0; e.reloadT = 0; e.useT = 0; e.stepT = 0;
     e.down = false; e.downT = 0; e.revT = 0;
     e.target = null; e.path = null; e.pathI = 0; e.repathT = 0;
@@ -2492,7 +2496,7 @@
   // Out of ammo is not out of the fight - swing the gun.
   function melee(e) {
     if (!e.alive || e.down || e.meleeT > 0 || e.useT > 0) return;
-    e.meleeT = 0.55;
+    e.meleeT = 0.78;
     e.swingT = 0.18;
     e.reloadT = 0;
     emit(e.x, e.y, MELEE_SND, e.id, 'melee');
@@ -2507,7 +2511,9 @@
       if (Math.abs(diff) > 1.0) continue;
       if (!lineClear(e.x, e.y, o.x, o.y)) continue;
       hitCause = 'melee';
-      damage(o, isZombie(e) ? 13 : 48, e.id, Math.atan2(dy, dx));
+      // a last resort, not a weapon: four swings to put someone down, and
+      // slow enough that anyone holding a gun wins the trade
+      damage(o, isZombie(e) ? 13 : 26, e.id, Math.atan2(dy, dx));
       hitCause = 'gun';
       hitAny = true;
     }
@@ -2692,9 +2698,12 @@
 
     if (e.local) e.place = alive + 1;
     if (e.local && !anyLocalAlive()) {
-      finishAfterCam(e, false, killer && killer !== e
+      var endMsg = killer && killer !== e
         ? kn + ' put ' + ((locals.length > 1) ? e.name : 'you') + ' down at ' + Math.round(dist(e, killer)) + ' units.'
-        : 'The zone closed over ' + ((locals.length > 1) ? e.name : 'you') + '.', alive + 1);
+        : 'The zone closed over ' + ((locals.length > 1) ? e.name : 'you') + '.';
+      // squadmates still up: stay in the match and watch them instead
+      if (specMates(e).length) e.pendEnd = [false, endMsg, alive + 1];
+      else finishAfterCam(e, false, endMsg, alive + 1);
     } else if (anyLocalAlive()) {
       var live = {}, nTeams = 0;
       for (var q = 0; q < ents.length; q++) {
@@ -3348,7 +3357,8 @@
   // LB/RB swap - LT sprint - RT fire - d-pad left frag, right smoke, up melee
   // (the right stick click melees too) - Start pause
   var PAD = { reload: 0, jump: 0, drop: 1, giveup: 1, pickup: 2, stim: 3, swapL: 4, swapR: 5,
-              sprint: 6, fire: 7, pause: 9, melee2: 11, melee: 12, frag: 14, smoke: 15 };
+              sprint: 6, fire: 7, map: 8, pause: 9, inv: 10, melee2: 11, melee: 12, ping: 13,
+              frag: 14, smoke: 15 };
   function inputFor(e) {
     var c = e.ctl || { any: true, kb: true };
     if (c.net) {
@@ -3384,12 +3394,38 @@
 
   function updateLocal(e, dt) {
     var I = inputFor(e);
-    if (!e.alive) { if (I.pad && I.hit(9)) pause(); return; }
+    if (!e.alive) {
+      if (I.pad && I.hit(PAD.pause)) pause();
+      if (e.spec && I.pad) {
+        if (I.hit(PAD.swapL)) specCycle(e, -1);
+        if (I.hit(PAD.swapR)) specCycle(e, 1);
+      }
+      return;
+    }
     if (e.air) {
       e._spd = 0; e.prompt = null;
       if (e === player) promptItem = null;
       if (I.pad && I.hit(9)) { pause(); return; }
       airControl(e, I, dt);
+      return;
+    }
+    if (e.invOpen && I.pad && I.padOn) {
+      // the stick walks the list, so you are not also walking into a wall
+      var iy = I.ax(1);
+      e.invT = Math.max(0, (e.invT || 0) - dt);
+      if (Math.abs(iy) > 0.55 && e.invT <= 0) { invMove(e, iy > 0 ? 1 : -1); e.invT = 0.18; }
+      if (I.hit(PAD.drop)) invDrop(e);
+      e._spd = 0; e.moving = false; e.prompt = null;
+      if (e === player) promptItem = null;
+      return;
+    }
+    if (e.mapOpen && I.pad && I.padOn) {
+      var mspan = MAP_W * TILE, mtall = MAP_H * TILE;
+      if (!e.mapCur) e.mapCur = { x: e.x, y: e.y };
+      e.mapCur.x = clamp(e.mapCur.x + I.ax(0) * mspan * 0.4 * dt, 0, mspan);
+      e.mapCur.y = clamp(e.mapCur.y + I.ax(1) * mtall * 0.4 * dt, 0, mtall);
+      e._spd = 0; e.moving = false; e.prompt = null;
+      if (e === player) promptItem = null;
       return;
     }
     if (e.down) {
@@ -3433,6 +3469,9 @@
       if (I.hit(PAD.frag)) throwNade(e, 'frag');
       if (I.hit(PAD.smoke)) throwNade(e, 'smoke');
       if (I.hit(PAD.melee) || I.hit(PAD.melee2)) melee(e);
+      if (I.hit(PAD.map)) { e.mapOpen = !e.mapOpen; e.mapCur = null; }
+      if (I.hit(PAD.inv)) { e.invOpen = !e.invOpen; e.invSel = 0; }
+      if (I.hit(PAD.ping)) { if (e.mapOpen && e.mapCur) pingAt(e, e.mapCur.x, e.mapCur.y); else pingAhead(e); }
       if (I.hit(PAD.pause)) { pause(); return; }
     }
     if (!padMove && I.touch && sticks.move) {
@@ -3506,7 +3545,7 @@
   function playerPickup(e) {
     e = e || kbPlayer();
     var it = e.prompt;
-    if (!it) return;
+    if (!it || heldBack(e, it)) return;
     var idx = loot.indexOf(it);
     if (idx >= 0) takeGun(e, it, idx);
     e.prompt = null;
@@ -3517,16 +3556,49 @@
     if (!e || !e.alive || e.down || e.air || mode === 'gun') return;
     var sl = curSlot(e);
     if (!sl || !WEAPONS[sl.key]) return;
-    loot.push({
+    markDropped(e, loot[loot.push({
       x: e.x + Math.cos(e.ang) * 20, y: e.y + Math.sin(e.ang) * 20, type: 'gun', key: sl.key,
       spin: rr(0, 6.2832), ammo: sl.ammo, n: 0, seen: true
-    });
+    }) - 1]);
     e.slots[e.slot] = null;
     e.reloadT = 0;
     var other = e.slot === 0 ? 1 : 0;
     if (e.slots[other]) e.slot = other;
     audioEmit(e.x, e.y, PICK_SND, e.id);
   }
+  // Anything that is not a gun: stims, frags, smoke, spare rounds.
+  function dropItem(e, kind) {
+    if (!e || !e.alive || e.down || e.air) return false;
+    var type = null, n = 1;
+    if (kind === 'ammo') {
+      if (!(e.reserve > 0) || e.reserve >= 9000) return false;
+      n = Math.min(30, e.reserve); e.reserve -= n; type = 'ammo';
+    } else if (kind === 'med' && e.meds > 0) { e.meds--; type = 'med'; }
+    else if (kind === 'nade' && e.nades > 0) { e.nades--; type = 'nade'; }
+    else if (kind === 'smoke' && e.smokes > 0) { e.smokes--; type = 'smoke'; }
+    if (!type) return false;
+    markDropped(e, loot[loot.push({
+      x: e.x + Math.cos(e.ang) * 20, y: e.y + Math.sin(e.ang) * 20, type: type, key: null,
+      spin: rr(0, 6.2832), ammo: 0, n: n, seen: true
+    }) - 1]);
+    audioEmit(e.x, e.y, PICK_SND, e.id);
+    return true;
+  }
+  // One place both a gun and a pocket item go through, so a guest can ask the
+  // host for the same thing a local player just does.
+  function dropKind(e, kind) {
+    if (!e) return;
+    if (netGuest && e === player) { netSend({ t: 'dr', k: kind }); return; }
+    if (kind === 'w0' || kind === 'w1') {
+      var want = kind === 'w1' ? 1 : 0;
+      if (!e.slots[want]) return;
+      if (e.slot !== want) swapSlot(want, e);
+      dropWeapon(e);
+      return;
+    }
+    dropItem(e, kind);
+  }
+
   function swapSlot(n, e) {
     e = e || kbPlayer();
     if (n === undefined) n = e.slot === 0 ? 1 : 0;
@@ -3742,6 +3814,9 @@
       if (bl.bleedLeft <= 0 && bl.hp > 0) { bl.bleeding = false; continue; }
       if (bl.hp <= 0) { bl.hp = 0; bl.bleeding = false; hitCause = 'bleed'; kill(bl, ents[bl.bleedBy] && ents[bl.bleedBy] !== bl ? bl.bleedBy : -1); hitCause = 'gun'; }
     }
+    pingTick(dt);
+    specTick();
+    specEndCheck();
     if (mode === 'tut') tutTick(dt);
     killcamTick(dt);
     if (MODE.respawn) {
@@ -3799,6 +3874,11 @@
       if (L.kc) {
         var kl = 1 - Math.pow(0.015, dt);
         lc.x += (L.kc.k.x - lc.x) * kl; lc.y += (L.kc.k.y - lc.y) * kl;
+        continue;
+      }
+      if (!L.alive && L.spec && L.spec.alive) {
+        var sl = 1 - Math.pow(0.02, dt);
+        lc.x += (L.spec.x - lc.x) * sl; lc.y += (L.spec.y - lc.y) * sl;
         continue;
       }
       // The camera is pinned to you; only the look-ahead toward the cursor
@@ -4294,9 +4374,14 @@
     locals: function () {
       return locals.map(function (L) {
         return { name: L.name, x: Math.round(L.x), y: Math.round(L.y), ang: +L.ang.toFixed(2), team: L.team,
-                 alive: L.alive, hp: Math.round(L.hp), ctl: L.ctl, w: curW(L) ? curW(L).name : null };
+                 alive: L.alive, hp: Math.round(L.hp), ctl: L.ctl, w: curW(L) ? curW(L).name : null,
+                 meds: L.meds, nades: L.nades, smokes: L.smokes, reserve: L.reserve,
+                 mapOpen: !!L.mapOpen, invOpen: !!L.invOpen, invSel: L.invSel | 0,
+                 spec: L.spec ? L.spec.name : null };
       });
     },
+    // the marks on the map right now
+    marks: function () { return pings.map(function (p) { return { x: p.x, y: p.y, team: p.team, by: p.by, t: +p.t.toFixed(1) }; }); },
     // advance the simulation without drawing, for testing behaviour
     step: function (seconds, dt) {
       dt = dt || 1 / 60;
@@ -4422,6 +4507,13 @@
         renderKillcam(kc0);
         return;
       }
+      if (!player.alive && player.spec && player.spec.alive) {
+        var meS = player, spS = player.spec;
+        player = spS; noOverlay = true;
+        try { renderScene(); } finally { player = meS; noOverlay = false; }
+        renderSpectate(spS);
+        return;
+      }
       renderScene();
       return;
     }
@@ -4447,6 +4539,10 @@
         player = kcS.k; noOverlay = true;
         try { renderScene(); } finally { player = L; noOverlay = false; }
         renderKillcam(kcS);
+      } else if (!L.alive && L.spec && L.spec.alive) {
+        player = L.spec; noOverlay = true;
+        try { renderScene(); } finally { player = L; noOverlay = false; }
+        renderSpectate(L.spec);
       } else renderScene();
       drawSplitHud(L);
       ctx.restore();
@@ -4885,8 +4981,11 @@
     renderDropHint();
     renderHostHold();
     renderAllies();
+    renderPings();
     renderObjectives();
-    if (SET.minimap && !splitVs()) drawMinimap();
+    if (player.mapOpen && !noOverlay) drawBigMap();
+    else if (SET.minimap && !splitVs()) drawMinimap();
+    if (player.invOpen && !noOverlay) drawInventory();
     renderReticle();
     renderDowned();
     renderPrompt();
@@ -5306,6 +5405,79 @@
     ctx.restore();
   }
 
+  // ---- watching the rest of your side ---------------------------------------
+  function specMates(e) {
+    var out = [];
+    for (var i = 0; i < ents.length; i++) {
+      var a = ents[i];
+      if (!a || a === e || !a.alive || a.hidden || a.team !== e.team) continue;
+      out.push(a);
+    }
+    return out;
+  }
+  function specCycle(e, d) {
+    var m = specMates(e);
+    if (!m.length) { e.spec = null; return; }
+    var at = m.indexOf(e.spec);
+    e.spec = m[((at < 0 ? 0 : at + d) + m.length) % m.length];
+    if (netGuest && e === player) netSend({ t: 'sp', id: e.spec.id });
+  }
+  // the results wait for the last of your side, win or lose
+  function specEndCheck() {
+    for (var i = 0; i < locals.length; i++) {
+      var L = locals[i];
+      if (L.alive || !L.pendEnd || L.kc || state !== 'play') continue;
+      if (specMates(L).length) {
+        var live = {}, n = 0;
+        for (var q = 0; q < ents.length; q++) {
+          if (ents[q] && ents[q].alive && !live[ents[q].team]) { live[ents[q].team] = 1; n++; }
+        }
+        // they took the whole thing while you watched
+        if (n === 1 && live[L.team]) { L.pendEnd = null; finish(true, 'Your squad is the last one moving.', 1); }
+        continue;
+      }
+      var pe = L.pendEnd; L.pendEnd = null;
+      finishAfterCam(L, pe[0], pe[1], pe[2]);
+    }
+  }
+  // keep the view on someone who is still standing
+  function specTick() {
+    for (var i = 0; i < locals.length; i++) {
+      var L = locals[i];
+      if (L.alive || state !== 'play' || L.kc) { if (L.alive) L.spec = null; continue; }
+      if (!L.spec || !L.spec.alive || L.spec.team !== L.team) {
+        var m = specMates(L);
+        L.spec = m.length ? m[0] : null;
+        if (netGuest && L === player) netSend({ t: 'sp', id: L.spec ? L.spec.id : -1 });
+      }
+    }
+  }
+  function renderSpectate(t) {
+    ctx.setTransform(dpr, 0, 0, dpr, dpr * VX, dpr * VY);
+    ctx.save();
+    var bar = Math.round(ch * 0.07);
+    ctx.fillStyle = '#05070b';
+    ctx.fillRect(0, 0, cw, bar); ctx.fillRect(0, ch - bar, cw, bar);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    // clear of the zone warning and the kill feed along the top
+    bar += 34;
+    ctx.font = '500 11px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(241,231,208,.75)';
+    ctx.fillText('SPECTATING', cw / 2, bar + 20);
+    ctx.font = '400 24px "Russo One", "Chakra Petch", sans-serif';
+    ctx.lineJoin = 'round'; ctx.lineWidth = 6; ctx.strokeStyle = '#0d0f12';
+    ctx.strokeText(t.name, cw / 2, bar + 46);
+    ctx.fillStyle = '#7ce7d8';
+    ctx.fillText(t.name, cw / 2, bar + 46);
+    ctx.font = '600 12px "IBM Plex Mono", monospace';
+    ctx.fillStyle = '#f1e7d0';
+    ctx.fillText(Math.max(0, Math.round(t.hp)) + ' HP  \u00b7  ' + (t.kills || 0) + ' KILLS', cw / 2, bar + 70);
+    ctx.font = '500 11px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(241,231,208,.7)';
+    ctx.fillText(usingPad(t) || usingPad(player) ? 'LB / RB SWITCHES' : 'A / D SWITCHES', cw / 2, ch - bar - 20);
+    ctx.restore();
+  }
+
   function renderKillcam(kc) {
     var k = kc.k;
     ctx.setTransform(dpr, 0, 0, dpr, dpr * VX, dpr * VY);
@@ -5382,9 +5554,163 @@
     ctx.restore();
   }
 
+  // ---- map marks: point at a spot and your side sees it ----------------------
+  var pings = [], PING_LIFE = 18;
+  function addPing(by, x, y) {
+    if (!by) return;
+    for (var i = pings.length - 1; i >= 0; i--) if (pings[i].by === by.id) pings.splice(i, 1);
+    pings.push({ x: Math.round(x), y: Math.round(y), team: by.team, by: by.id, name: by.name || '', t: 0 });
+    // no sound ring: a mark must not give away where the one who dropped it stands
+    if (player && by !== player && by.team === player.team) feed('<b>' + (by.name || 'A TEAMMATE') + '</b> marked the map', true);
+  }
+  // A guest asks the host, so everyone's map agrees.
+  function pingAt(e, x, y) {
+    if (!e) return;
+    x = clamp(x, 0, MAP_W * TILE); y = clamp(y, 0, MAP_H * TILE);
+    if (netGuest) { netSend({ t: 'pg', x: Math.round(x), y: Math.round(y) }); return; }
+    addPing(e, x, y);
+  }
+  function pingAhead(e) { pingAt(e, e.x + Math.cos(e.ang) * 700, e.y + Math.sin(e.ang) * 700); }
+  function pingTick(dt) {
+    for (var i = pings.length - 1; i >= 0; i--) { pings[i].t += dt; if (pings[i].t > PING_LIFE) pings.splice(i, 1); }
+  }
+  function myPings() {
+    var out = [];
+    for (var i = 0; i < pings.length; i++) if (pings[i].team === player.team) out.push(pings[i]);
+    return out;
+  }
+  // a mark stands out in the world too, wherever you are looking
+  function renderPings() {
+    if (noOverlay) return;
+    var list = myPings();
+    if (!list.length) return;
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
+      var fade = Math.min(1, (PING_LIFE - p.t) / 2.5);
+      var sx = (p.x - cam.x) * zoom + cw / 2, sy = (p.y - cam.y) * zoom + ch / 2;
+      var pd = 30, off = sx < pd || sx > cw - pd || sy < pd || sy > ch - pd;
+      sx = clamp(sx, pd, cw - pd); sy = clamp(sy, pd, ch - pd);
+      var pulse = 1 + Math.sin(performance.now() / 200 + i) * 0.14;
+      ctx.globalAlpha = fade;
+      ctx.strokeStyle = '#0d0f12'; ctx.fillStyle = '#f2bd1d';
+      ctx.shadowColor = '#f2bd1d'; ctx.shadowBlur = 10;
+      ctx.save();
+      ctx.translate(sx, sy - (off ? 0 : 16));
+      ctx.scale(pulse, pulse);
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(9, 0); ctx.lineTo(0, 13); ctx.lineTo(-9, 0); ctx.closePath();
+      ctx.stroke(); ctx.fill();
+      ctx.restore();
+      ctx.shadowBlur = 0;
+      ctx.font = '700 10px "IBM Plex Mono", monospace';
+      pill(Math.round(dist(p, player)) + 'u', sx, sy + (off ? 24 : 6), '#f2bd1d');
+    }
+    ctx.restore();
+  }
+
   // ---- minimap: only ground you have actually seen ------------------------
   var mini = null, miniAge = 0, miniReveal = false;
+  // ---- your kit, laid out, with anything droppable ---------------------------
+  function invRows(e) {
+    var s0 = e.slots[0], s1 = e.slots[1];
+    return [
+      { kind: 'w0', label: 'PRIMARY', val: s0 ? WEAPONS[s0.key].name + '  ' + s0.ammo : '\u2014', has: !!s0 },
+      { kind: 'w1', label: 'SECONDARY', val: s1 ? WEAPONS[s1.key].name + '  ' + s1.ammo : '\u2014', has: !!s1 },
+      { kind: 'ammo', label: 'ROUNDS', val: e.reserve >= 9000 ? 'PLENTY' : String(e.reserve | 0), has: e.reserve > 0 && e.reserve < 9000 },
+      { kind: 'med', label: 'STIMS', val: String(e.meds | 0), has: e.meds > 0 },
+      { kind: 'nade', label: 'FRAGS', val: String(e.nades | 0), has: e.nades > 0 },
+      { kind: 'smoke', label: 'SMOKE', val: String(e.smokes | 0), has: e.smokes > 0 }
+    ];
+  }
+  function invMove(e, d) {
+    var rows = invRows(e);
+    e.invSel = ((e.invSel || 0) + d + rows.length) % rows.length;
+  }
+  function invDrop(e) {
+    var rows = invRows(e), r = rows[e.invSel || 0];
+    if (r && r.has) dropKind(e, r.kind);
+  }
+  var invRect = null;
+  function drawInventory() {
+    var e = player, rows = invRows(e);
+    var W = Math.min(340, cw - 48), RH = 34, H = RH * rows.length + 74;
+    var bx = Math.round((cw - W) / 2), by = Math.round((ch - H) / 2);
+    ctx.save();
+    ctx.fillStyle = 'rgba(4,6,10,.72)'; ctx.fillRect(0, 0, cw, ch);
+    ctx.fillStyle = 'rgba(8,12,18,.94)'; ctx.fillRect(bx, by, W, H);
+    ctx.strokeStyle = 'rgba(242,189,29,.5)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx + .75, by + .75, W - 1.5, H - 1.5);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.font = '400 15px "Russo One", "Chakra Petch", sans-serif';
+    ctx.fillStyle = '#f1e7d0';
+    ctx.fillText('KIT', bx + W / 2, by + 24);
+    var sel = e.invSel || 0;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i], ry = by + 44 + i * RH;
+      if (i === sel) {
+        ctx.fillStyle = 'rgba(242,189,29,.14)';
+        ctx.fillRect(bx + 8, ry, W - 16, RH - 4);
+        ctx.strokeStyle = 'rgba(242,189,29,.75)'; ctx.lineWidth = 1;
+        ctx.strokeRect(bx + 8.5, ry + .5, W - 17, RH - 5);
+      }
+      ctx.font = '600 11px "IBM Plex Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = r.has ? 'rgba(241,231,208,.8)' : 'rgba(146,170,196,.45)';
+      ctx.fillText(r.label, bx + 20, ry + (RH - 4) / 2);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = r.has ? '#f1e7d0' : 'rgba(146,170,196,.45)';
+      ctx.fillText(r.val, bx + W - 20, ry + (RH - 4) / 2);
+    }
+    ctx.textAlign = 'center';
+    ctx.font = '600 10px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(241,231,208,.7)';
+    ctx.fillText(usingPad(e)
+      ? 'LEFT STICK PICKS  \u00b7  B DROPS  \u00b7  L3 CLOSES'
+      : 'ARROWS PICK  \u00b7  Z DROPS  \u00b7  TAB CLOSES', bx + W / 2, by + H - 18);
+    ctx.restore();
+    if (e === kbPlayer()) invRect = { x: VX + bx, y: VY + by + 44, w: W, rh: RH, n: rows.length };
+  }
+  // a click straight on a row picks it and puts it down
+  function invClick(sx, sy) {
+    var r = invRect, kp = kbPlayer();
+    if (!r || !kp.invOpen || state !== 'play') return false;
+    if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.rh * r.n) {
+      kp.invSel = Math.floor((sy - r.y) / r.rh);
+      invDrop(kp);
+    }
+    return true;                       // the panel swallows the click either way
+  }
+
+  var mapRect = null;
   function drawMinimap() {
+    var S = Math.round(Math.min(148, Math.min(cw, ch) * 0.30));
+    drawMapInto(16, Math.max(60, ch - S - (splitOn ? 78 : 158)), S, false);
+  }
+  // The whole map, for reading the ground and dropping a mark on it.
+  function drawBigMap() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(4,6,10,.74)';
+    ctx.fillRect(0, 0, cw, ch);
+    // room left under it for the hint, clear of the health bar and the guns
+    var S = Math.round(Math.min(cw * 0.88, ch * 0.70));
+    var bx = Math.round((cw - S) / 2), by = Math.round((ch - S) / 2) - 8;
+    drawMapInto(bx, by, S, true);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '400 15px "Russo One", "Chakra Petch", sans-serif';
+    ctx.fillStyle = '#f1e7d0';
+    ctx.fillText('MAP', cw / 2, by - 22);
+    ctx.font = '600 11px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(241,231,208,.75)';
+    ctx.fillText(usingPad(player)
+      ? 'LEFT STICK MOVES THE CURSOR  \u00b7  D-PAD DOWN MARKS  \u00b7  BACK CLOSES'
+      : 'CLICK TO MARK  \u00b7  M CLOSES', cw / 2, by + S + 20);
+    ctx.restore();
+  }
+  function drawMapInto(bx, by, S, big) {
     if (!mini) mini = document.createElement('canvas');
     var rev = false;
     for (var lq = 0; lq < locals.length; lq++) if (locals[lq].air) rev = true;
@@ -5410,9 +5736,6 @@
     }
     miniAge--;
 
-    var S = Math.round(Math.min(148, Math.min(cw, ch) * 0.30));
-    // bottom left, above your health and kit
-    var bx = 16, by = Math.max(60, ch - S - (splitOn ? 78 : 158));
     var span = MAP_W * TILE;
     function mx(wx) { return bx + (wx / span) * S; }
     function my(wy) { return by + (wy / (MAP_H * TILE)) * S; }
@@ -5486,10 +5809,42 @@
       ctx.lineTo(mx(player.x) + Math.cos(player.ang) * 8, my(player.y) + Math.sin(player.ang) * 8);
       ctx.stroke();
     }
+    var mp = myPings(), sc = big ? 1.9 : 1;
+    for (var pq = 0; pq < mp.length; pq++) {
+      var pk = mp[pq], pz = (3.6 + Math.sin(performance.now() / 200 + pq) * 0.7) * sc;
+      ctx.globalAlpha = Math.min(1, (PING_LIFE - pk.t) / 2.5);
+      ctx.fillStyle = '#f2bd1d'; ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 2 * sc;
+      ctx.beginPath();
+      ctx.moveTo(mx(pk.x), my(pk.y) - pz); ctx.lineTo(mx(pk.x) + pz, my(pk.y));
+      ctx.lineTo(mx(pk.x), my(pk.y) + pz); ctx.lineTo(mx(pk.x) - pz, my(pk.y));
+      ctx.closePath(); ctx.stroke(); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    if (big && player.mapCur) {
+      var cx2 = mx(player.mapCur.x), cy2 = my(player.mapCur.y);
+      ctx.strokeStyle = '#eaf4ff'; ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(cx2 - 9, cy2); ctx.lineTo(cx2 + 9, cy2);
+      ctx.moveTo(cx2, cy2 - 9); ctx.lineTo(cx2, cy2 + 9);
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx2, cy2, 5, 0, 6.2832); ctx.stroke();
+    }
     ctx.strokeStyle = 'rgba(146,170,196,.35)';
     ctx.lineWidth = 1;
     ctx.strokeRect(bx + .5, by + .5, S - 1, S - 1);
     ctx.restore();
+    // where the mouse has to be for a click to land on this map
+    if (player === kbPlayer()) mapRect = { x: VX + bx, y: VY + by, s: S, big: !!big };
+  }
+  function mapClick(sx, sy) {
+    var r = mapRect;
+    if (!r || state !== 'play') return false;
+    if (sx < r.x || sx > r.x + r.s || sy < r.y || sy > r.y + r.s) return false;
+    var kp = kbPlayer();
+    // the corner map opens; the open map takes the mark
+    if (!r.big) { kp.mapOpen = true; kp.mapCur = null; return true; }
+    pingAt(kp, (sx - r.x) / r.s * (MAP_W * TILE), (sy - r.y) / r.s * (MAP_H * TILE));
+    return true;
   }
 
   function renderDamage() {
@@ -5851,7 +6206,9 @@
       if (!sticks[side]) sticks[side] = { id: ev.pointerId, ox: ev.clientX - r.left, oy: ev.clientY - r.top, x: ev.clientX - r.left, y: ev.clientY - r.top };
     } else {
       initAudio();
-      mouse.down = true;
+      var r2 = canvas.getBoundingClientRect();
+      var cx3 = ev.clientX - r2.left, cy3 = ev.clientY - r2.top;
+      if (!invClick(cx3, cy3) && !mapClick(cx3, cy3)) mouse.down = true;
     }
     ev.preventDefault();
   });
@@ -5882,17 +6239,28 @@
     // 1 and 2 into ! and @
     if (e.code === 'Digit1' || e.code === 'Numpad1') k = '1';
     else if (e.code === 'Digit2' || e.code === 'Numpad2') k = '2';
-    if (netRole && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden) { e.preventDefault(); openIgChat(); return; }
+    if (netRole && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden && !(player && player.invOpen)) { e.preventDefault(); openIgChat(); return; }
     if (netGuest && state === 'play') {
       var GB = { 'e': PAD.pickup, ' ': PAD.jump, 'v': PAD.melee, 'x': PAD.giveup, 'r': PAD.reload, 'f': PAD.stim,
                  'h': PAD.smoke, 'g': PAD.frag, 'q': PAD.swapL, '1': PAD.swapL, '2': PAD.swapL, 'z': PAD.drop };
-      if (k === 'escape') { if (settingsOpenFromPause()) $('setBack').click(); else if (netGuestPaused) resume(); else pause(); }
+      if (k === 'escape') {
+        if (settingsOpenFromPause()) $('setBack').click();
+        else if (player && (player.mapOpen || player.invOpen)) { player.mapOpen = false; player.invOpen = false; }
+        else if (netGuestPaused) resume(); else pause();
+      }
+      else if (!netGuestPaused && player && !player.alive && player.spec && (k === 'a' || k === 'd')) specCycle(player, k === 'a' ? -1 : 1);
+      else if (k === 'm' && player) { player.mapOpen = !player.mapOpen; player.mapCur = null; }
+      else if (k === 'tab' && player) { player.invOpen = !player.invOpen; player.invSel = 0; }
+      else if (k === 'c' && player) pingAt(player, mouse.wx, mouse.wy);
+      else if (player && player.invOpen && (k === 'arrowup' || k === 'arrowdown')) invMove(player, k === 'arrowup' ? -1 : 1);
+      else if (player && player.invOpen && k === 'z') invDrop(player);
       else if (GB[k] !== undefined && !netGuestPaused && !e.repeat) guestHits |= 1 << GB[k];
-      if (['w', 'a', 's', 'd', ' '].indexOf(k) >= 0) e.preventDefault();
+      if (['w', 'a', 's', 'd', ' ', 'tab', 'arrowup', 'arrowdown'].indexOf(k) >= 0) e.preventDefault();
       return;
     }
     if (state === 'play') {
       var kp = kbPlayer();
+      if (!kp.alive && kp.spec && (k === 'a' || k === 'd')) { specCycle(kp, k === 'a' ? -1 : 1); return; }
       if (kp.air === 'plane' && (k === 'e' || k === ' ')) kp.jumpReq = true;
       if (kp.air) { if (k === 'escape') pause(); return; }
       if (k === 'r') startReload(kp);
@@ -5904,11 +6272,15 @@
       else if (k === 'g') throwNade(kp, 'frag');
       else if (k === 'h') throwNade(kp, 'smoke');
       else if (k === 'v') melee(kp);
-      else if (k === 'z') dropWeapon(kp);
+      else if (k === 'z') { if (kp.invOpen) invDrop(kp); else dropWeapon(kp); }
+      else if (k === 'm') { kp.mapOpen = !kp.mapOpen; kp.mapCur = null; }
+      else if (k === 'tab') { kp.invOpen = !kp.invOpen; kp.invSel = 0; }
+      else if (kp.invOpen && (k === 'arrowup' || k === 'arrowdown')) invMove(kp, k === 'arrowup' ? -1 : 1);
+      else if (k === 'c') pingAt(kp, mouse.wx, mouse.wy);
       else if (k === 'x' && kp.down) { kp.hp = 0; kill(kp, -1); }
-      else if (k === 'escape') pause();
+      else if (k === 'escape') { if (kp.mapOpen || kp.invOpen) { kp.mapOpen = false; kp.invOpen = false; } else pause(); }
     } else if (k === 'escape' && state === 'paused') { if (settingsOpenFromPause()) $('setBack').click(); else resume(); }
-    if (['w', 'a', 's', 'd', ' '].indexOf(k) >= 0) e.preventDefault();
+    if (['w', 'a', 's', 'd', ' ', 'tab', 'arrowup', 'arrowdown'].indexOf(k) >= 0) e.preventDefault();
   });
   window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
   window.addEventListener('blur', function () {
@@ -6337,6 +6709,12 @@
     if (m.t === 'in') {
       g.in.ax = m.ax || [0, 0]; g.in.aim = m.aim; g.in.down = m.down | 0;
       g.in.hits |= m.hits | 0;
+    } else if (m.t === 'sp') {
+      g.spec = m.id | 0;
+    } else if (m.t === 'dr') {
+      dropKind(g.ent, String(m.k || ''));
+    } else if (m.t === 'pg') {
+      addPing(g.ent, m.x, m.y);
     } else if (m.t === 'pchat') {
       partySay(g.name, m.text);
     } else if (m.t === 'hi') {
@@ -6416,8 +6794,18 @@
   }
 
   var NET_SEE = 1500;                       // how far a guest is told about
+  // A dead guest watches a teammate, so their slice of the world follows that
+  // teammate instead of their own body.
+  function guestEye(g) {
+    var e = g.ent;
+    if (e && !e.alive && g.spec >= 0) {
+      var t = ents[g.spec];
+      if (t && t.alive && t.team === e.team) return t;
+    }
+    return e;
+  }
   function nearGuest(g, x, y) {
-    var ge = g.ent;
+    var ge = guestEye(g);
     if (!ge) return true;
     var dx = x - ge.x, dy = y - ge.y;
     return dx * dx + dy * dy < NET_SEE * NET_SEE;
@@ -6513,6 +6901,7 @@
         var bu = bullets[bi];
         if (nearGuest(g, bu.x, bu.y)) x.b.push([Math.round(bu.x), Math.round(bu.y), Math.round(bu.vx), Math.round(bu.vy), bu.owner]);
       }
+      x.pg = pings.filter(function (q) { return q.team === g.ent.team; });
       x.f = flashes.filter(function (q) { return nearGuest(g, q.x, q.y); });
       x.im = impacts.filter(function (q) { return nearGuest(g, q.x, q.y); });
       x.sm = smokes.filter(function (q) { return nearGuest(g, q.x, q.y); });
@@ -6805,6 +7194,7 @@
     zombClock = h[6]; matchTime = h[7]; fieldN = h[8];
     if (player) kills = player.kills || 0;
     dmgMarks = m.dm || [];
+    pings = m.pg || [];
     if (m.lo) loot = m.lo.map(unpackLoot);
     if (m.dc) decals = m.dc.map(unpackMark);
     if (m.de) deaths = m.de.map(unpackMark);
@@ -6852,6 +7242,10 @@
 
   function guestTick(dt) {
     pollPad();
+    if (player && !player.alive && player.spec && pad && !netGuestPaused) {
+      if (padHit(PAD.swapL)) specCycle(player, -1);
+      if (padHit(PAD.swapR)) specCycle(player, 1);
+    }
     while (netQueue.length) applySnap(netQueue.shift());
     if (!player) return;
     var i;
@@ -6894,9 +7288,13 @@
     player.leadX = (player.leadX || 0) + (glx - (player.leadX || 0)) * lerp;
     player.leadY = (player.leadY || 0) + (gly - (player.leadY || 0)) * lerp;
     killcamTick(dt);
+    specTick();
     if (player.kc) {
       var gk = 1 - Math.pow(0.015, dt);
       cam.x += (player.kc.k.x - cam.x) * gk; cam.y += (player.kc.k.y - cam.y) * gk;
+    } else if (!player.alive && player.spec && player.spec.alive) {
+      var gs = 1 - Math.pow(0.02, dt);
+      cam.x += (player.spec.x - cam.x) * gs; cam.y += (player.spec.y - cam.y) * gs;
     } else {
       cam.x = player.x + player.leadX; cam.y = player.y + player.leadY;
     }
