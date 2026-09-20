@@ -4288,7 +4288,8 @@
     },
     net: function () {
       return { role: netRole, guest: netGuest, open: !!(netConn && netConn.open), guests: netGuests.map(function (g) { return g.name + (g.ent ? '@' + g.ent.id : ''); }), sent: netStat.sent, recv: netStat.recv,
-               err: netStat.err, queue: netQueue.length, hasPlayer: !!player, ents: ents.length, state: state };
+               err: netStat.err, queue: netQueue.length, hasPlayer: !!player, ents: ents.length, state: state,
+               kbSent: Math.round(netStat.bytes / 1024), kbRecv: Math.round(netStat.rbytes / 1024) };
     },
     locals: function () {
       return locals.map(function (L) {
@@ -4340,6 +4341,7 @@
         botShots: botShots, botHits: botHits, botHitsOnYou: botHitsOnYou, targetSwaps: targetSwaps, killCauses: killCauses,
         minEnemyDist: Math.round(minEnemy), bullets: bullets.length,
         sounds: sounds.length, shotsByPlayer: shots,
+        loot: loot.length, lootFirst: loot[0] || null, decals: decals.length, corpses: corpses.length,
         sight: DIFF[difficulty].sight, mapW: MAP_W
       };
     }
@@ -4739,7 +4741,7 @@
     }
     for (i = 0; i < ents.length; i++) {
       var en = ents[i];
-      if (!en.alive || en === player || en.air === 'plane') continue;
+      if (!en.alive || en.hidden || en === player || en.air === 'plane') continue;
       if (!visibleToPlayer(en.x, en.y)) continue;
       drawUnit(en, en.team === player.team ? '#8ff0e4' : '#ff7a4d');
     }
@@ -5083,7 +5085,7 @@
     var mates = [];
     for (var i = 0; i < ents.length; i++) {
       var a = ents[i];
-      if (a === player || !a.alive || a.air === 'plane' || a.team !== player.team) continue;
+      if (a === player || !a.alive || a.hidden || a.air === 'plane' || a.team !== player.team) continue;
       mates.push(a);
     }
     if (!mates.length) return;
@@ -6202,7 +6204,7 @@
   var PEER_JS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
   var netEv = [], netDefs = [], netSendT = 0, netSigs = {}, guestHits = 0, netInT = 0;
   var netQueue = [], guestYou = -1, netLastIn = '', quickFail = null, guestStickAt = -1e9, guestTrig = false;
-  var netStat = { sent: 0, recv: 0, err: '' };
+  var netStat = { sent: 0, recv: 0, err: '', bytes: 0, rbytes: 0 };
   var WKEYS = Object.keys(WEAPONS);
 
   function netStatus(txt) { var el = $('netStatus'); if (el) el.textContent = txt; }
@@ -6235,7 +6237,8 @@
   }
   function netSendTo(g, objOrStr) {
     if (!g.conn || !g.conn.open) return;
-    try { g.conn.send(typeof objOrStr === 'string' ? objOrStr : netStr(objOrStr)); netStat.sent++; }
+    var pay = typeof objOrStr === 'string' ? objOrStr : netStr(objOrStr);
+    try { g.conn.send(pay); netStat.sent++; netStat.bytes += pay.length; }
     catch (err) { netStat.err = String(err && err.message || err); }
   }
   function netSendAll(obj) { var str = netStr(obj); for (var i = 0; i < netGuests.length; i++) netSendTo(netGuests[i], str); }
@@ -6412,11 +6415,18 @@
                    kills: g.ent.kills || 0, time: matchTime });
   }
 
+  var NET_SEE = 1500;                       // how far a guest is told about
+  function nearGuest(g, x, y) {
+    var ge = g.ent;
+    if (!ge) return true;
+    var dx = x - ge.x, dy = y - ge.y;
+    return dx * dx + dy * dy < NET_SEE * NET_SEE;
+  }
   function packEnt(e) {
     var s0 = e.slots[0], s1 = e.slots[1];
     var bits = (e.alive ? 1 : 0) | (e.down ? 2 : 0) | (e.moving ? 4 : 0) |
                (e.air === 'plane' ? 8 : 0) | (e.air === 'chute' ? 16 : 0) | (e.bot ? 32 : 0) | (e.bleeding ? 64 : 0);
-    return [e.id, e.x, e.y, e.ang, e.team, e.skin, bits, e.animT || 0, e.animFire || 0, e.swingT || 0,
+    return [e.id, Math.round(e.x), Math.round(e.y), e.ang, e.team, e.skin, bits, e.animT || 0, e.animFire || 0, e.swingT || 0,
             e.throwT || 0, e.meleeT || 0, Math.round(e.hp), e.revT || 0, e.downT || 0, e.respawnT || 0,
             e.level || 0, e.airT || 0, e.name, e.slot,
             s0 ? WKEYS.indexOf(s0.key) : -1, s0 ? s0.ammo : 0, s1 ? WKEYS.indexOf(s1.key) : -1, s1 ? s1.ammo : 0,
@@ -6425,6 +6435,31 @@
   function sigOf(list) {
     var h = list.length;
     for (var i = Math.max(0, list.length - 3); i < list.length; i++) h = (h * 31 + (list[i].x | 0) * 7 + (list[i].y | 0)) | 0;
+    return h;
+  }
+  var LTYPE = ['gun', 'ammo', 'med', 'nade', 'smoke'];
+  function packLoot(it) {
+    return [it.x | 0, it.y | 0, LTYPE.indexOf(it.type), it.key ? WKEYS.indexOf(it.key) : -1,
+            it.ammo | 0, it.n | 0, (it.spin * 100) | 0, it.seen ? 1 : 0];
+  }
+  function unpackLoot(a) {
+    return { x: a[0], y: a[1], type: LTYPE[a[2]], key: a[3] >= 0 ? WKEYS[a[3]] : null,
+             ammo: a[4], n: a[5], spin: a[6] / 100, seen: !!a[7] };
+  }
+  function packMark(m) {
+    return [m.x | 0, m.y | 0, +(m.ang || 0).toFixed(2), +(m.scale || 1).toFixed(2), +(m.t || 0).toFixed(2)];
+  }
+  function unpackMark(a) {
+    return { x: a[0], y: a[1], ang: a[2], scale: a[3], t: a[4] };
+  }
+  function nearOnly(g, arr) {
+    var out = [];
+    for (var i = 0; i < arr.length; i++) if (nearGuest(g, arr[i].x, arr[i].y)) out.push(arr[i]);
+    return out;
+  }
+  function listSig(arr) {
+    var h = arr.length;
+    for (var i = 0; i < arr.length; i++) h = (h * 31 + (arr[i].x | 0) + (arr[i].y | 0) * 7 + (arr[i].ammo | 0)) | 0;
     return h;
   }
   function lootSig() {
@@ -6450,31 +6485,58 @@
     // everything everyone sees, serialised once
     var shared = netStr({
       t: 's', hold: state === 'paused',
-      e: ents.map(packEnt),
-      b: bullets.map(function (b) { return [b.x, b.y, b.vx, b.vy, b.owner]; }),
-      f: flashes, im: impacts, sm: smokes,
-      n: nades.map(function (g) { return { x: g.x, y: g.y, spin: g.spin, kind: g.kind, fuse: g.fuse, owner: g.owner }; }),
       fl: flags.map(function (f) {
         return { team: f.team, hx: f.hx, hy: f.hy, x: f.x, y: f.y, home: f.home, ping: f.ping, carrier: f.carrier ? f.carrier.id : -1 };
       }),
       se: sectors, z: zone, p: plane,
-      so: blackout ? sounds.map(function (q) {
-        return { x: q.x, y: q.y, r: q.r, maxR: q.maxR, speed: q.speed, color: q.color, w: q.w, kind: q.kind, owner: q.owner };
-      }) : null,
+
       h: [alive, score[0], score[1], round, roundClock, roundBreak, zombClock, matchTime, fieldN],
       ev: netEv
     });
-    var ls = lootSig(), ds = sigOf(decals), es = sigOf(deaths), cs = sigOf(corpses);
+
     for (var gi = 0; gi < netGuests.length; gi++) {
       var g = netGuests[gi];
       if (!g.ent) continue;
       // what this one person still needs: their own hit marks, and any lists
       // that changed since we last sent them
+      // only what is near this guest: 48 people at 20 a second was a flood
       var x = { dm: dmgMarks.filter(function (m) { return m.who === g.ent.id; }) };
-      if (g.sigs.lo !== ls) { g.sigs.lo = ls; x.lo = loot; }
-      if (g.sigs.dc !== ds) { g.sigs.dc = ds; x.dc = decals; }
-      if (g.sigs.de !== es) { g.sigs.de = es; x.de = deaths; }
-      if (g.sigs.co !== cs) { g.sigs.co = cs; x.co = corpses.slice(-80); }
+      x.e = [];
+      for (var ei = 0; ei < ents.length; ei++) {
+        var en = ents[ei];
+        var ownSide = en === g.ent || en.team === g.ent.team;
+        if (!ownSide && (en.air === 'plane' || !nearGuest(g, en.x, en.y))) continue;
+        x.e.push(packEnt(en));
+      }
+      x.b = [];
+      for (var bi = 0; bi < bullets.length; bi++) {
+        var bu = bullets[bi];
+        if (nearGuest(g, bu.x, bu.y)) x.b.push([Math.round(bu.x), Math.round(bu.y), Math.round(bu.vx), Math.round(bu.vy), bu.owner]);
+      }
+      x.f = flashes.filter(function (q) { return nearGuest(g, q.x, q.y); });
+      x.im = impacts.filter(function (q) { return nearGuest(g, q.x, q.y); });
+      x.sm = smokes.filter(function (q) { return nearGuest(g, q.x, q.y); });
+      if (blackout) x.so = sounds.filter(function (q) { return nearGuest(g, q.x, q.y); }).map(function (q) {
+        return { x: Math.round(q.x), y: Math.round(q.y), r: Math.round(q.r), maxR: q.maxR, speed: q.speed, color: q.color, w: q.w, kind: q.kind, owner: q.owner };
+      });
+      x.n = nades.filter(function (q) { return nearGuest(g, q.x, q.y); }).map(function (gn) {
+        return { x: Math.round(gn.x), y: Math.round(gn.y), spin: gn.spin, kind: gn.kind, fuse: gn.fuse, owner: gn.owner };
+      });
+      // The floor near this guest, four times a second instead of twenty, and
+      // not at all while they are still in the plane - a guest crossing the
+      // map re-enters this set constantly, and resending it was most of the
+      // traffic in a full battle royale.
+      g.clut = (g.clut || 0) + 1;
+      if (!g.ent.air && g.clut % 5 === 0) {
+        var near = nearOnly(g, loot), sg = listSig(near);
+        if (g.sigs.lo !== sg) { g.sigs.lo = sg; x.lo = near.map(packLoot); }
+        near = nearOnly(g, decals); sg = listSig(near);
+        if (g.sigs.dc !== sg) { g.sigs.dc = sg; x.dc = near.map(packMark); }
+        near = nearOnly(g, deaths); sg = listSig(near);
+        if (g.sigs.de !== sg) { g.sigs.de = sg; x.de = near.map(packMark); }
+        near = nearOnly(g, corpses); sg = listSig(near);
+        if (g.sigs.co !== sg) { g.sigs.co = sg; x.co = near.map(packMark); }
+      }
       if ((g.defsSent || 0) < netDefs.length) {
         x.defs = {};
         for (var k = g.defsSent || 0; k < netDefs.length; k++) {
@@ -6622,7 +6684,7 @@
   function acctUid() { return (window.firebase && firebase.auth && firebase.apps.length && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : ''; }
 
   function guestReceive(raw) {
-    netStat.recv++;
+    netStat.recv++; netStat.rbytes += (raw && raw.length) || 0;
     var m; try { m = JSON.parse(raw); } catch (err) { netStat.err = 'parse: ' + typeof raw; return; }
     if (m.t === 's') {
       if (m.x) { for (var xk in m.x) m[xk] = m.x[xk]; }
@@ -6701,9 +6763,12 @@
       e.id = id; e.x = a[1]; e.y = a[2];
       ents[id] = e;
     }
+    var mine = e.id === guestYou;
     if (Math.abs(a[1] - e.x) + Math.abs(a[2] - e.y) > 90) { e.x = a[1]; e.y = a[2]; }
     e.tx = a[1]; e.ty = a[2];
-    e.ang = a[3]; e.team = a[4]; e.skin = a[5];
+    // your own body: you steer it here and now; the host's word only nudges
+    // it back if the two drift apart
+    if (!mine) e.ang = a[3]; e.team = a[4]; e.skin = a[5];
     var bits = a[6];
     e.alive = !!(bits & 1); e.down = !!(bits & 2); e.moving = !!(bits & 4);
     e.air = (bits & 8) ? 'plane' : ((bits & 16) ? 'chute' : null); e.bot = !!(bits & 32); e.bleeding = !!(bits & 64);
@@ -6718,14 +6783,19 @@
 
   function applySnap(m) {
     var i;
-    for (i = 0; i < m.e.length; i++) netEnt(m.e[i]);
+    var seen = {};
+    for (i = 0; i < m.e.length; i++) { netEnt(m.e[i]); seen[m.e[i][0]] = 1; }
+    for (i = 0; i < ents.length; i++) {
+      if (!ents[i]) { var st = makeEnt({ x: 0, y: 0 }, true, ''); st.id = i; st.alive = false; ents[i] = st; }
+      ents[i].hidden = !seen[i];
+    }
     if (!player && ents[guestYou]) {
       player = ents[guestYou];
       player.local = true; player.ctl = { any: true, kb: true }; player.cam = cam;
       cam.x = player.x; cam.y = player.y;
       locals = [player];
     }
-    bullets = m.b.map(function (b) { return { x: b[0], y: b[1], vx: b[2], vy: b[3], owner: b[4], life: 1 }; });
+    bullets = (m.b || []).map(function (b) { return { x: b[0], y: b[1], vx: b[2], vy: b[3], owner: b[4], life: 1 }; });
     flashes = m.f || []; impacts = m.im || []; smokes = m.sm || []; nades = m.n || [];
     flags = (m.fl || []).map(function (f) { f.carrier = f.carrier >= 0 ? ents[f.carrier] : null; return f; });
     sectors = m.se || []; zone = m.z; plane = m.p;
@@ -6735,10 +6805,10 @@
     zombClock = h[6]; matchTime = h[7]; fieldN = h[8];
     if (player) kills = player.kills || 0;
     dmgMarks = m.dm || [];
-    if (m.lo) loot = m.lo;
-    if (m.dc) decals = m.dc;
-    if (m.de) deaths = m.de;
-    if (m.co) corpses = m.co;
+    if (m.lo) loot = m.lo.map(unpackLoot);
+    if (m.dc) decals = m.dc.map(unpackMark);
+    if (m.de) deaths = m.de.map(unpackMark);
+    if (m.co) corpses = m.co.map(unpackMark);
     if (m.defs) for (var k in m.defs) netDefs[k] = m.defs[k];
     netHostHeld = !!m.hold;
     var ev = m.ev || [];
@@ -6754,6 +6824,32 @@
     }
   }
 
+  // The guest walks and turns its own player straight away, exactly as the
+  // host will a moment later. Without this every step waited on the network.
+  function guestPredict(dt) {
+    var e = player;
+    if (!e || !e.alive || e.down || e.air || netGuestPaused) return;
+    var mx = 0, my = 0;
+    if (pad) { mx = padAxis(0); my = padAxis(1); }
+    if (!mx && !my) {
+      if (keys['a']) mx -= 1; if (keys['d']) mx += 1;
+      if (keys['w']) my -= 1; if (keys['s']) my += 1;
+    }
+    var ml = Math.sqrt(mx * mx + my * my);
+    if (ml > 1) { mx /= ml; my /= ml; }
+    var sprint = (!!keys['shift'] || (pad && padDown(PAD.sprint))) && (mx || my);
+    var base = curW(e) ? 168 : 190;
+    var sp = sprint ? base * 1.45 : base;
+    if (mx || my) { moveEnt(e, mx * sp * dt, my * sp * dt); e.moving = true; e._spd = sp; }
+    else { e.moving = false; e._spd = 0; }
+    // aim where this player is pointing, now
+    if (pad) {
+      var rx = pad.axes[2] || 0, ry = pad.axes[3] || 0, dz = SET.dead / 100;
+      if (rx * rx + ry * ry >= (dz + 0.1) * (dz + 0.1)) e.ang = Math.atan2(ry, rx);
+    }
+    if (!padActive() && mouse.sx !== undefined) e.ang = Math.atan2(mouse.wy - e.y, mouse.wx - e.x);
+  }
+
   function guestTick(dt) {
     pollPad();
     while (netQueue.length) applySnap(netQueue.shift());
@@ -6764,8 +6860,16 @@
     for (i = 0; i < ents.length; i++) {
       var e = ents[i];
       if (!e || e.tx === undefined) continue;
+      if (e === player) {
+        // gentle correction only, so your own movement never stutters
+        var ex = e.tx - e.x, ey = e.ty - e.y, ed = Math.sqrt(ex * ex + ey * ey);
+        if (ed > 120) { e.x = e.tx; e.y = e.ty; }
+        else if (ed > 3) { e.x += ex * Math.min(1, dt * 2.5); e.y += ey * Math.min(1, dt * 2.5); }
+        continue;
+      }
       e.x += (e.tx - e.x) * kk; e.y += (e.ty - e.y) * kk;
     }
+    guestPredict(dt);
     for (var p = parts.length - 1; p >= 0; p--) {
       var pt = parts[p];
       pt.life -= dt;
