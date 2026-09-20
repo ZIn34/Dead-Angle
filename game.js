@@ -109,7 +109,22 @@
   var elSlot = [$('slot0'), $('slot1')];
   var elRelBar = $('relBar'), elRelFill = $('relFill');
 
-  var cw = 0, ch = 0, dpr = 1, zoom = 1;
+  var cw = 0, ch = 0, dpr = 1, zoom = 1, zoom0 = 1;
+  // The sniper is the long-range gun, so holding one opens the view up: twice
+  // the sight, and the camera pulls back by the same amount so you can use it.
+  var SNIPE_SIGHT = 2, VIEW_MUL = 1;
+  function sightR() { return VIEW_R * VIEW_MUL; }
+  function sightWant(e) {
+    var sl = e && e.alive && !e.air ? curSlot(e) : null;
+    return sl && sl.key === 'rifle' ? SNIPE_SIGHT : 1;
+  }
+  function sightTick(dt) {
+    for (var i = 0; i < locals.length; i++) {
+      var L = locals[i];
+      if (L.sightM === undefined) L.sightM = 1;
+      L.sightM += (sightWant(L) - L.sightM) * Math.min(1, dt * 4);
+    }
+  }
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -117,7 +132,7 @@
     ch = canvas.clientHeight || window.innerHeight;
     canvas.width = Math.max(1, Math.round(cw * dpr));
     canvas.height = Math.max(1, Math.round(ch * dpr));
-    zoom = Math.max(0.55, Math.min(2.4, Math.min(cw, ch) / (VIEW_BASE * 2 + 60)));
+    zoom = zoom0 = Math.max(0.55, Math.min(2.4, Math.min(cw, ch) / (VIEW_BASE * 2 + 60)));
   }
   window.addEventListener('resize', resize);
 
@@ -580,7 +595,8 @@
   function visibleToPlayer(x, y) {
     if (!inCone(player, x, y)) return false;
     var dx = x - player.x, dy = y - player.y;
-    return dx * dx + dy * dy < VIEW_R * VIEW_R && sightClear(player.x, player.y, x, y);
+    var sr = sightR();
+    return dx * dx + dy * dy < sr * sr && sightClear(player.x, player.y, x, y);
   }
   function litVisible(x, y, reach) {
     if (!inCone(player, x, y)) return false;
@@ -1189,7 +1205,6 @@
   // ---------------------------------------------------------------- state
   var state = 'menu';
   var difficulty = 1, mode = 'br', mapKind = 'cqb', blackout = false, squad = 1;
-  var botFill = 1;                   // share of the usual bot count: 1, 0.5 or 0.25
   // Everyone starts in plain grey; credits come from playing and buy the rest.
   var BASE_SKIN = 9;
   var WALLET = { coins: 0, owned: [BASE_SKIN], skin: BASE_SKIN };
@@ -1653,12 +1668,6 @@
     var per = MODE.teams ? (MODE.field >> 1) : squad;
     fieldN = MODE.field;
     if (squad > 1 && !MODE.teams && mode === 'duel') fieldN = 4;   // 1v1 becomes 2v2
-    // fewer bots if asked, never so few there is nobody to fight
-    if (botFill < 1 && mode !== 'duel' && mode !== 'tut') {
-      var humN = 1 + (netRole === 'host' ? netGuests.length : 0) + (splitWant ? 1 : 0);
-      fieldN = Math.max(humN + 2, Math.round(fieldN * botFill));
-      if (MODE.teams && fieldN % 2) fieldN++;
-    }
     alive = fieldN;
     var sp = MODE.teams ? teamSpawns(fieldN)
            : (squad > 1 ? squadSpawns(Math.ceil(fieldN / squad), squad) : pickSpawns(fieldN));
@@ -3815,6 +3824,7 @@
       if (bl.hp <= 0) { bl.hp = 0; bl.bleeding = false; hitCause = 'bleed'; kill(bl, ents[bl.bleedBy] && ents[bl.bleedBy] !== bl ? bl.bleedBy : -1); hitCause = 'gun'; }
     }
     pingTick(dt);
+    sightTick(dt);
     specTick();
     specEndCheck();
     if (mode === 'tut') tutTick(dt);
@@ -4377,7 +4387,7 @@
                  alive: L.alive, hp: Math.round(L.hp), ctl: L.ctl, w: curW(L) ? curW(L).name : null,
                  meds: L.meds, nades: L.nades, smokes: L.smokes, reserve: L.reserve,
                  mapOpen: !!L.mapOpen, invOpen: !!L.invOpen, invSel: L.invSel | 0,
-                 spec: L.spec ? L.spec.name : null };
+                 spec: L.spec ? L.spec.name : null, sight: +(L.sightM || 1).toFixed(2) };
       });
     },
     // the marks on the map right now
@@ -4498,6 +4508,8 @@
 
     if (!splitOn) {
       VX = 0; VY = 0; VW = cw; VH = ch;
+      zoom = Math.max(0.45, zoom0 / (player.sightM || 1));
+      VIEW_MUL = zoom0 / zoom;
       player.viewX = 0; player.viewY = 0; player.viewW = cw; player.viewH = ch; player.zoom = zoom;
       if (player.kc) {
         // see the world as the one who got you saw it
@@ -4528,7 +4540,9 @@
       else { VX = 0; VY = Math.round(pi * fullH / 2); VW = fullW; VH = Math.round(fullH / 2); }
       // (viewX..: vx/vy on an entity are its velocity - never reuse those)
       L.viewX = VX; L.viewY = VY; L.viewW = VW; L.viewH = VH;
-      L.zoom = Math.max(0.5, Math.min(2.4, Math.min(VW, VH) / (VIEW_BASE * 2 + 60)));
+      var zBase = Math.max(0.5, Math.min(2.4, Math.min(VW, VH) / (VIEW_BASE * 2 + 60)));
+      L.zoom = Math.max(0.45, zBase / (L.sightM || 1));
+      VIEW_MUL = zBase / L.zoom;
       cw = VW; ch = VH; zoom = L.zoom; player = L; cam = L.cam; promptItem = L.prompt;
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -4547,7 +4561,7 @@
       drawSplitHud(L);
       ctx.restore();
     }
-    cw = fullW; ch = fullH; zoom = z0; player = p0; cam = cam0; promptItem = pr0;
+    cw = fullW; ch = fullH; zoom = z0; player = p0; cam = cam0; promptItem = pr0; VIEW_MUL = 1;
     VX = 0; VY = 0; VW = cw; VH = ch;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -4653,7 +4667,8 @@
     var r0 = Math.max(0, Math.floor(vy0 / TILE) - 1), r1 = Math.min(MAP_H - 1, Math.ceil(vy1 / TILE) + 1);
     var i, ty, tx;
 
-    computeVisibility(player.x, player.y, VIEW_R);
+    var VR = sightR();
+    computeVisibility(player.x, player.y, VR);
     exploreTick++;
     if (exploreTick % 3 === 0) markExplored(player.x, player.y);
 
@@ -4683,13 +4698,13 @@
     for (i = 0; i < visPts.length; i += 2) {
       var ox = visPts[i] - player.x, oy = visPts[i + 1] - player.y;
       var od = Math.sqrt(ox * ox + oy * oy) || 1;
-      var push = od < VIEW_R - 2 ? TILE * 0.95 : 0;
+      var push = od < VR - 2 ? TILE * 0.95 : 0;
       if (i === 0) poly.moveTo(visPts[i] + ox / od * push, visPts[i + 1] + oy / od * push);
       else poly.lineTo(visPts[i] + ox / od * push, visPts[i + 1] + oy / od * push);
     }
     poly.closePath();
     ctx.clip(poly);
-    var cone = new Path2D(), cR = VIEW_R + TILE * 3;
+    var cone = new Path2D(), cR = VR + TILE * 3;
     cone.moveTo(player.x, player.y);
     cone.arc(player.x, player.y, cR, player.ang - FOV_HALF, player.ang + FOV_HALF);
     cone.closePath();
@@ -4842,12 +4857,12 @@
       drawUnit(en, en.team === player.team ? '#8ff0e4' : '#ff7a4d');
     }
 
-    var g = ctx.createRadialGradient(player.x, player.y, VIEW_R * 0.18, player.x, player.y, VIEW_R);
+    var g = ctx.createRadialGradient(player.x, player.y, VR * 0.18, player.x, player.y, VR);
     g.addColorStop(0, 'rgba(4,6,10,0)');
     g.addColorStop(0.62, 'rgba(4,6,10,.28)');
     g.addColorStop(1, 'rgba(4,6,10,.93)');
     ctx.fillStyle = g;
-    ctx.fillRect(player.x - VIEW_R, player.y - VIEW_R, VIEW_R * 2, VIEW_R * 2);
+    ctx.fillRect(player.x - VR, player.y - VR, VR * 2, VR * 2);
 
     if (impacts.length) {
       var smI = ctx.imageSmoothingEnabled;
@@ -4877,7 +4892,7 @@
     // --- light. In normal play it reaches exactly as far as you can see, so
     //     nothing leaks out of the dark. In blackout, gunfire is the one thing
     //     that finds people for you.
-    var reach = blackout ? FLASH_REACH : VIEW_R;
+    var reach = blackout ? FLASH_REACH : VR;
     ctx.lineCap = 'round';
     for (i = 0; i < bullets.length; i++) {
       var b = bullets[i];
@@ -6387,7 +6402,6 @@
   partyPickRow('partyMapRow', 'mapRow', 'data-p', function (v) { mapKind = v; });
   partyPickRow('partySquadRow', 'squadRow', 'data-s', function (v) { squad = parseInt(v, 10); });
   partyPickRow('partyDiffRow', 'diffRow', 'data-d', function (v) { difficulty = parseInt(v, 10); });
-  partyPickRow('partyBotsRow', 'botsRow', 'data-b', function (v) { botFill = parseFloat(v); });
   $('partyStart').addEventListener('click', function () { startMatch(); });
   $('pchatSend').addEventListener('click', function () { sendPartyChat($('pchatInput').value); $('pchatInput').value = ''; });
   $('pchatInput').addEventListener('keydown', function (ev) {
@@ -6416,12 +6430,6 @@
     mapKind = b.getAttribute('data-p');
     pressRow(this, 'data-p', mapKind);
     syncMenu();
-  });
-  $('botsRow').addEventListener('click', function (ev) {
-    var b = ev.target.closest('button');
-    if (!b) return;
-    botFill = parseFloat(b.getAttribute('data-b'));
-    pressRow(this, 'data-b', b.getAttribute('data-b'));
   });
   $('diffRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
@@ -6949,7 +6957,7 @@
     cgRoom();
     if (netRole === 'host') netSendAll({ t: 'party', names: partyNames(), code: netCode,
       pick: MODE_LABEL[mode] + (mode !== 'duel' ? ' \u00b7 ' + mapKind.toUpperCase() : '') + (MODES[mode].teams ? '' : (squad > 1 ? ' \u00b7 DUOS' : ' \u00b7 SOLO')) +
-        ' \u00b7 ' + ['CALM', 'STANDARD', 'RUTHLESS'][difficulty] + ' BOTS' + (botFill < 1 ? (botFill < 0.5 ? ' (FEW)' : ' (HALF)') : '') });
+        ' \u00b7 ' + ['CALM', 'STANDARD', 'RUTHLESS'][difficulty] + ' BOTS' });
   }
   var partyList = [];
   function partyRender() {
@@ -6973,7 +6981,6 @@
       pressRow($('partyMapRow'), 'data-p', mapKind);
       pressRow($('partySquadRow'), 'data-s', String(squad));
       pressRow($('partyDiffRow'), 'data-d', String(difficulty));
-      pressRow($('partyBotsRow'), 'data-b', String(botFill));
       $('partyMapPick').hidden = mode === 'duel';
       $('partySquadPick').hidden = !!MODES[mode].teams;
     }
@@ -7288,6 +7295,7 @@
     player.leadX = (player.leadX || 0) + (glx - (player.leadX || 0)) * lerp;
     player.leadY = (player.leadY || 0) + (gly - (player.leadY || 0)) * lerp;
     killcamTick(dt);
+    sightTick(dt);
     specTick();
     if (player.kc) {
       var gk = 1 - Math.pow(0.015, dt);
