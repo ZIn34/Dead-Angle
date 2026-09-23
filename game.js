@@ -1913,33 +1913,42 @@
   // Each step waits for you to actually do it.
   var tut = { i: 0, t: 0, moved: 0, sprint: 0, kills: 0, lx: 0, ly: 0, slotWas: 0, flash: 0 };
   var TUT = [
-    { title: 'MOVE', k: 'W A S D to walk', p: 'LEFT STICK to walk',
+    { title: 'MOVE', k: 'Walk around', p: 'Walk around', g: { wasd: 1 }, gp: { caps: ['LEFT STICK'] },
       done: function () { return tut.moved > 260; } },
-    { title: 'AIM', k: 'Point with the MOUSE - you always face it', p: 'Point with the RIGHT STICK',
+    { title: 'AIM', k: 'You always face the cursor', p: 'You face where the stick points',
+      g: { mouse: 'move' }, gp: { caps: ['RIGHT STICK'] },
       done: function () { return tut.t > 2.5; } },
-    { title: 'SHOOT', k: 'Follow the gold marker to the targets. CLICK to shoot one', p: 'Follow the gold marker to the targets. RT to shoot one', mark: 'targets',
+    { title: 'SHOOT', k: 'Shoot a target', p: 'Shoot a target', mark: 'targets',
+      g: { mouse: 'left' }, gp: { caps: ['RT'] },
       done: function () { return tut.hits >= 1; } },
-    { title: 'RELOAD', k: 'R to reload', p: 'A to reload',
+    { title: 'RELOAD', k: 'Reload', p: 'Reload', g: { caps: ['R'] }, gp: { caps: ['A'] },
       start: function () { var sl = curSlot(player); if (sl) sl.ammo = Math.min(sl.ammo, 4); },
       done: function () { return player.reloadT > 0; } },
-    { title: 'PICK UP', k: 'Walk to the rifle (gold marker) and press E', p: 'Walk to the rifle (gold marker) and press X', mark: 'item',
+    { title: 'PICK UP', k: 'Take the rifle', p: 'Take the rifle', mark: 'item',
+      g: { caps: ['E'] }, gp: { caps: ['X'] },
       start: function () { tutDrop('gun', 'silenced'); },
       done: function () { return hasGun(player, 'silenced'); } },
-    { title: 'SWAP', k: 'Q (or 1 / 2) swaps weapons', p: 'LB or RB swaps weapons',
+    { title: 'SWAP', k: 'Swap weapons', p: 'Swap weapons',
+      g: { caps: ['Q', '1', '2'] }, gp: { caps: ['LB', 'RB'] },
       start: function () { tut.slotWas = player.slot; },
       done: function () { return player.slot !== tut.slotWas; } },
-    { title: 'SPRINT', k: 'Hold SHIFT while walking - fast, but loud', p: 'Hold LT while walking - fast, but loud',
+    { title: 'SPRINT', k: 'Hold it while walking - fast, but loud', p: 'Hold it while walking - fast, but loud',
+      g: { caps: ['SHIFT'] }, gp: { caps: ['LT'] },
       done: function () { return tut.sprint > 1.2; } },
-    { title: 'FRAG', k: 'G throws a frag - hit the group', p: 'D-PAD LEFT throws a frag - hit the group', mark: 'targets',
+    { title: 'FRAG', k: 'Throw a frag at the group', p: 'Throw a frag at the group', mark: 'targets',
+      g: { caps: ['G'] }, gp: { caps: ['D-PAD LEFT'] },
       start: function () { player.nades = Math.max(player.nades, 1); tut.have = player.nades; },
       done: function () { return player.nades < tut.have; } },
-    { title: 'SMOKE', k: 'H throws smoke - nobody sees through it', p: 'D-PAD RIGHT throws smoke - nobody sees through it',
+    { title: 'SMOKE', k: 'Throw smoke - nobody sees through it', p: 'Throw smoke - nobody sees through it',
+      g: { caps: ['H'] }, gp: { caps: ['D-PAD RIGHT'] },
       start: function () { player.smokes = Math.max(player.smokes, 1); tut.have = player.smokes; },
       done: function () { return player.smokes < tut.have; } },
-    { title: 'HEAL', k: 'You are hurt. F uses a stim', p: 'You are hurt. Y uses a stim',
+    { title: 'HEAL', k: 'You are hurt - use a stim', p: 'You are hurt - use a stim',
+      g: { caps: ['F'] }, gp: { caps: ['Y'] },
       start: function () { player.hp = Math.min(player.hp, 45); player.meds = Math.max(player.meds, 1); tut.have = player.meds; },
       done: function () { return player.meds < tut.have; } },
-    { title: 'MELEE', k: 'V swings the gun butt - works with no ammo', p: 'D-PAD UP (or click the right stick) swings the gun butt',
+    { title: 'MELEE', k: 'Swing the gun butt - works with no ammo', p: 'Swing the gun butt - works with no ammo',
+      g: { caps: ['V'] }, gp: { caps: ['D-PAD UP'] },
       done: function () { return player.meleeT > 0; } },
     { title: 'LISTEN', k: 'Every shot and footstep makes noise, and bots hunt by ear. In BLACKOUT you only see sound rings - a muzzle flash is the one exact giveaway.',
       p: null, wait: 7, done: function () { return tut.t > 7; } },
@@ -1948,7 +1957,8 @@
     { title: 'DROP IN', k: 'Battle royale starts in a plane: SPACE to jump, then steer your chute with W A S D. Stay inside the closing ring.',
       p: 'Battle royale starts in a plane: A to jump, then steer your chute with the LEFT STICK. Stay inside the closing ring.',
       wait: 8, done: function () { return tut.t > 8; } },
-    { title: 'READY', k: 'That is everything. Press ENTER for the menu.', p: 'That is everything. Press A for the menu.',
+    { title: 'READY', k: 'That is everything.', p: 'That is everything.',
+      g: { caps: ['ENTER'] }, gp: { caps: ['A'] },
       last: true, done: function () { return false; } }
   ];
   function hasGun(e, key) { return !!((e.slots[0] && e.slots[0].key === key) || (e.slots[1] && e.slots[1].key === key)); }
@@ -2022,6 +2032,12 @@
       if (TUT[tut.i].start) TUT[tut.i].start();
     }
   }
+  function tutLeave() {
+    if (mode !== 'tut' || tut.leaving) return;
+    tut.leaving = true;
+    setTimeout(tutDone, 0);
+  }
+  if ($('tutSkip')) $('tutSkip').addEventListener('click', tutLeave);
   function tutDone() {
     storeSet('earshot.tutDone', '1');
     goHome();
@@ -2033,6 +2049,67 @@
     var b = $('tutBtn');
     if (b) { b.className = done ? 'go ghost' : 'go'; b.textContent = done ? 'TUTORIAL' : 'TUTORIAL \u2014 START HERE'; }
   }
+  // A key cap, drawn the way it looks under a finger. Showing the control
+  // beats another sentence about it.
+  function capW(label) {
+    ctx.font = '700 12px "IBM Plex Mono", monospace';
+    return Math.max(32, ctx.measureText(label).width + 20);
+  }
+  function capBox(label, cx, y) {
+    var w = capW(label), h = 30, x = cx - w / 2;
+    ctx.fillStyle = '#f2bd1d'; ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 3;
+    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = '#0d0f12';
+    ctx.fillRect(x + 2, y + h - 5, w - 4, 3);
+    ctx.font = '700 12px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, cx, y + h / 2 - 1);
+    return w;
+  }
+  function capRow(list, cx, y) {
+    var i, total = 0, ws = [];
+    for (i = 0; i < list.length; i++) { ws.push(capW(list[i])); total += ws[i] + 8; }
+    var x = cx - (total - 8) / 2;
+    for (i = 0; i < list.length; i++) { capBox(list[i], x + ws[i] / 2, y); x += ws[i] + 8; }
+  }
+  function capWasd(cx, y) {
+    capBox('W', cx, y);
+    capBox('A', cx - 40, y + 34); capBox('S', cx, y + 34); capBox('D', cx + 40, y + 34);
+  }
+  function mouseGlyph(cx, y, kind) {
+    var w = 30, h = 42, x = cx - w / 2;
+    ctx.fillStyle = '#f1e7d0'; ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 3;
+    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    if (kind === 'left') {                       // the button you press, lit
+      ctx.fillStyle = '#f2bd1d';
+      ctx.fillRect(x + 2, y + 2, w / 2 - 3, h / 3 - 1);
+    }
+    ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y + h / 3); ctx.lineTo(x + w, y + h / 3);
+    ctx.moveTo(cx, y); ctx.lineTo(cx, y + h / 3);
+    ctx.stroke();
+    if (kind === 'move') {                       // a nudge either way
+      ctx.strokeStyle = '#f2bd1d'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x - 10, y + h * 0.62); ctx.lineTo(x - 22, y + h * 0.62);
+      ctx.moveTo(x + w + 10, y + h * 0.62); ctx.lineTo(x + w + 22, y + h * 0.62);
+      ctx.stroke();
+      ctx.fillStyle = '#f2bd1d';
+      ctx.beginPath(); ctx.moveTo(x - 26, y + h * 0.62); ctx.lineTo(x - 18, y + h * 0.62 - 5); ctx.lineTo(x - 18, y + h * 0.62 + 5); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + w + 26, y + h * 0.62); ctx.lineTo(x + w + 18, y + h * 0.62 - 5); ctx.lineTo(x + w + 18, y + h * 0.62 + 5); ctx.closePath(); ctx.fill();
+    }
+  }
+  function drawStepGlyph(st, cx, y) {
+    var g = (usingPad(player) && st.gp) ? st.gp : st.g;
+    if (!g) return;
+    ctx.save();
+    if (g.wasd) capWasd(cx, y);
+    else if (g.mouse) mouseGlyph(cx, y, g.mouse);
+    else if (g.caps) capRow(g.caps, cx, y);
+    ctx.restore();
+  }
+
   function renderTutorial() {
     if (mode !== 'tut' || !player) return;
     var st = TUT[tut.i];
@@ -2061,6 +2138,7 @@
     ctx.font = '500 13px "IBM Plex Mono", monospace';
     ctx.fillStyle = '#f1e7d0';
     for (var li = 0; li < lines.length; li++) ctx.fillText(lines[li], cw / 2, by + 46 + li * 19);
+    drawStepGlyph(st, cw / 2, by + bh + 14);
     var marks = [];
     if (st.mark === 'targets') { for (var mi = 0; mi < ents.length; mi++) if (ents[mi].dummy && ents[mi].alive) marks.push(ents[mi]); }
     else if (st.mark === 'item' && tut.item && loot.indexOf(tut.item) >= 0) marks.push(tut.item);
@@ -3918,6 +3996,8 @@
   }
 
   function syncHud() {
+    var sk = $('tutSkip');
+    if (sk) sk.hidden = !(mode === 'tut' && state === 'play');
     var hp = Math.max(0, Math.round(player.hp));
     elHpN.textContent = hp;
     elHpFill.style.width = hp + '%';

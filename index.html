@@ -44,6 +44,8 @@ body{margin:0;background:var(--void);color:var(--text);font-family:var(--font-d)
 
 /* ---------- HUD ---------- */
 .hud{position:absolute;inset:0;pointer-events:none;font-family:var(--font-m)}
+.tutskip{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:calc(16px + env(safe-area-inset-left,0px));pointer-events:auto;appearance:none;border:3px solid var(--out);background:var(--navy);color:var(--paper);font-family:var(--font-m);font-size:10.5px;font-weight:600;letter-spacing:.14em;padding:8px 14px;cursor:pointer;box-shadow:3px 3px 0 rgba(0,0,0,.45)}
+.tutskip:hover{background:var(--gold);color:var(--out)}
 .hud-top{position:absolute;top:16px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:4px}
 .alive{display:flex;align-items:baseline;gap:8px}
 .alive-n{font-family:var(--font-d);font-weight:700;font-size:34px;line-height:1;color:var(--text);font-variant-numeric:tabular-nums;text-shadow:0 0 18px rgba(124,231,216,.35)}
@@ -226,6 +228,7 @@ h1 .gold{color:var(--gold)}
   <canvas id="c"></canvas>
 
   <div class="hud" id="hud" hidden>
+    <button class="tutskip" id="tutSkip" type="button" hidden>SKIP TUTORIAL</button>
     <div class="hud-top">
       <div class="alive"><span class="alive-n" id="aliveN">10</span><span class="alive-l" id="aliveL">ALIVE</span></div>
       <div class="zone-line" id="zoneLine">ZONE HOLDS &middot; 0:26</div>
