@@ -3982,7 +3982,7 @@
     } else if (mode === 'tut') {
       elAlive.textContent = Math.min(tut.i + 1, TUT.length) + '/' + TUT.length;
       elZone.className = 'zone-line';
-      elZone.textContent = 'ESC TO LEAVE';
+      elZone.textContent = 'ESC OR P TO LEAVE';
     } else if (mode === 'duel') {
       elAlive.textContent = score[player.team] + ' \u2013 ' + score[1 - player.team];
       elZone.className = 'zone-line';
@@ -6246,19 +6246,27 @@
   canvas.addEventListener('pointercancel', releasePointer);
   canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
+  // Which key it is by where it sits on the board. A French AZERTY player
+  // presses the same square of four keys everyone else does, and Shift no
+  // longer turns 1 and 2 into ! and @.
+  var CODEKEY = {
+    KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f',
+    KeyG: 'g', KeyH: 'h', KeyV: 'v', KeyZ: 'z', KeyX: 'x', KeyC: 'c', KeyM: 'm', KeyT: 't',
+    KeyP: 'p', Digit1: '1', Digit2: '2', Numpad1: '1', Numpad2: '2', Space: ' ',
+    Escape: 'escape', Enter: 'enter', NumpadEnter: 'enter', Tab: 'tab',
+    ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
+    ShiftLeft: 'shift', ShiftRight: 'shift'
+  };
+  function keyOf(e) { return CODEKEY[e.code] || (e.key || '').toLowerCase(); }
   window.addEventListener('keydown', function (e) {
     kbmLast = performance.now();
-    var k = e.key.toLowerCase();
+    var k = keyOf(e);
     keys[k] = true;
-    // number keys by position, so Shift (sprint) held down does not turn
-    // 1 and 2 into ! and @
-    if (e.code === 'Digit1' || e.code === 'Numpad1') k = '1';
-    else if (e.code === 'Digit2' || e.code === 'Numpad2') k = '2';
     if (netRole && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden && !(player && player.invOpen)) { e.preventDefault(); openIgChat(); return; }
     if (netGuest && state === 'play') {
       var GB = { 'e': PAD.pickup, ' ': PAD.jump, 'v': PAD.melee, 'x': PAD.giveup, 'r': PAD.reload, 'f': PAD.stim,
                  'h': PAD.smoke, 'g': PAD.frag, 'q': PAD.swapL, '1': PAD.swapL, '2': PAD.swapL, 'z': PAD.drop };
-      if (k === 'escape') {
+      if (k === 'escape' || k === 'p') {
         if (settingsOpenFromPause()) $('setBack').click();
         else if (player && (player.mapOpen || player.invOpen)) { player.mapOpen = false; player.invOpen = false; }
         else if (netGuestPaused) resume(); else pause();
@@ -6293,11 +6301,11 @@
       else if (kp.invOpen && (k === 'arrowup' || k === 'arrowdown')) invMove(kp, k === 'arrowup' ? -1 : 1);
       else if (k === 'c') pingAt(kp, mouse.wx, mouse.wy);
       else if (k === 'x' && kp.down) { kp.hp = 0; kill(kp, -1); }
-      else if (k === 'escape') { if (kp.mapOpen || kp.invOpen) { kp.mapOpen = false; kp.invOpen = false; } else pause(); }
-    } else if (k === 'escape' && state === 'paused') { if (settingsOpenFromPause()) $('setBack').click(); else resume(); }
+      else if (k === 'escape' || k === 'p') { if (kp.mapOpen || kp.invOpen) { kp.mapOpen = false; kp.invOpen = false; } else pause(); }
+    } else if ((k === 'escape' || k === 'p') && state === 'paused') { if (settingsOpenFromPause()) $('setBack').click(); else resume(); }
     if (['w', 'a', 's', 'd', ' ', 'tab', 'arrowup', 'arrowdown'].indexOf(k) >= 0) e.preventDefault();
   });
-  window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+  window.addEventListener('keyup', function (e) { keys[keyOf(e)] = false; });
   window.addEventListener('blur', function () {
     keys = {}; mouse.down = false;
     if (state === 'play' && !netRole) pause();      // a friend online keeps playing

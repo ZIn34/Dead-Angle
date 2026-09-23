@@ -1,3 +1,9 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="description" content="Dead Angle - a top-down shooter where sound gives you away.">
 <title>Dead Angle</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -28,6 +34,8 @@
   --font-m:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
 }
 *{box-sizing:border-box}
+/* phones: no text selection, no double-tap zoom, no rubber-band scroll */
+html,body{-webkit-user-select:none;-moz-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none;touch-action:manipulation}
 [hidden]{display:none!important}
 html,body{height:100%}
 body{margin:0;background:var(--void);color:var(--text);font-family:var(--font-d);overflow:hidden;-webkit-font-smoothing:antialiased}
@@ -51,7 +59,7 @@ body{margin:0;background:var(--void);color:var(--text);font-family:var(--font-d)
 
 .hud.split .hud-bot{display:none}
 .hud.split .feed{top:58px}
-.hud-bot{position:absolute;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+.hud-bot{position:absolute;left:calc(16px + env(safe-area-inset-left,0px));right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
 .vit{display:flex;flex-direction:column;gap:7px;min-width:0}
 .hpbar{width:min(34vw,210px);height:6px;background:rgba(44,61,82,.55);overflow:hidden}
 .hpbar i{display:block;height:100%;width:100%;background:var(--cyan);box-shadow:0 0 12px rgba(124,231,216,.5)}
@@ -76,7 +84,7 @@ body{margin:0;background:var(--void);color:var(--text);font-family:var(--font-d)
 .rel i{display:block;height:100%;width:0;background:var(--amber)}
 
 /* ---------- Screens ---------- */
-.screen{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;pointer-events:auto;background:radial-gradient(120% 90% at 50% 42%,rgba(20,16,10,.25) 0%,rgba(14,12,9,.72) 60%,rgba(10,9,7,.92) 100%)}
+.screen{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;padding:calc(24px + env(safe-area-inset-top,0px)) calc(16px + env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) calc(16px + env(safe-area-inset-left,0px));overflow-y:auto;pointer-events:auto;background:radial-gradient(120% 90% at 50% 42%,rgba(20,16,10,.25) 0%,rgba(14,12,9,.72) 60%,rgba(10,9,7,.92) 100%)}
 .panel{width:100%;max-width:600px;margin:auto 0;display:flex;flex-direction:column;align-items:center;gap:22px;text-align:center}
 
 .brand{display:flex;flex-direction:column;align-items:center;gap:12px}
@@ -212,7 +220,8 @@ h1 .gold{color:var(--gold)}
   .go{transition:none}
 }
 </style>
-
+</head>
+<body>
 <div id="app">
   <canvas id="c"></canvas>
 
@@ -322,6 +331,7 @@ h1 .gold{color:var(--gold)}
         <span><kbd>F</kbd> stim</span>
         <span><kbd>Z</kbd> drop weapon</span><span><kbd>TAB</kbd> kit</span><span><kbd>M</kbd> map</span><span><kbd>C</kbd> mark</span>
         <span><kbd>T</kbd> party chat</span>
+        <span><kbd>P</kbd> pause</span>
         <span><kbd>SHIFT</kbd> sprint &mdash; loud</span>
       </div>
       <div class="pbtns">
@@ -573,3 +583,5 @@ h1 .gold{color:var(--gold)}
   EARSHOT.loadFx('impact_metal', { src: 'assets/impact_metal.png', cols: 3, rows: 3, fps: 30, chroma: false });
   EARSHOT.loadFx('death',        { src: 'assets/death_blood.png',  cols: 11, fps: 16, split: 6, poolFps: 9, chroma: false });
 </script>
+</body>
+</html>
