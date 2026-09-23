@@ -3496,12 +3496,20 @@
       airControl(e, I, dt);
       return;
     }
+    // These come first: while the kit or the map is up the rest of this
+    // function returns early, so anything read later could never close them.
+    if (I.pad) {
+      if (I.hit(PAD.map)) { e.mapOpen = !e.mapOpen; e.mapCur = null; }
+      if (I.hit(PAD.inv)) { e.invOpen = !e.invOpen; e.invSel = 0; }
+      if ((e.invOpen || e.mapOpen) && I.hit(PAD.pause)) { pause(); return; }
+    }
     if (e.invOpen && I.pad && I.padOn) {
       // the stick walks the list, so you are not also walking into a wall
       var iy = I.ax(1);
       e.invT = Math.max(0, (e.invT || 0) - dt);
       if (Math.abs(iy) > 0.55 && e.invT <= 0) { invMove(e, iy > 0 ? 1 : -1); e.invT = 0.18; }
       if (I.hit(PAD.drop)) invDrop(e);
+      if (I.hit(PAD.pickup)) { e.invOpen = false; }      // X backs out
       e._spd = 0; e.moving = false; e.prompt = null;
       if (e === player) promptItem = null;
       return;
@@ -3511,6 +3519,8 @@
       if (!e.mapCur) e.mapCur = { x: e.x, y: e.y };
       e.mapCur.x = clamp(e.mapCur.x + I.ax(0) * mspan * 0.4 * dt, 0, mspan);
       e.mapCur.y = clamp(e.mapCur.y + I.ax(1) * mtall * 0.4 * dt, 0, mtall);
+      if (I.hit(PAD.ping)) pingAt(e, e.mapCur.x, e.mapCur.y);
+      if (I.hit(PAD.drop)) e.mapOpen = false;            // B backs out
       e._spd = 0; e.moving = false; e.prompt = null;
       if (e === player) promptItem = null;
       return;
@@ -3556,9 +3566,7 @@
       if (I.hit(PAD.frag)) throwNade(e, 'frag');
       if (I.hit(PAD.smoke)) throwNade(e, 'smoke');
       if (I.hit(PAD.melee) || I.hit(PAD.melee2)) melee(e);
-      if (I.hit(PAD.map)) { e.mapOpen = !e.mapOpen; e.mapCur = null; }
-      if (I.hit(PAD.inv)) { e.invOpen = !e.invOpen; e.invSel = 0; }
-      if (I.hit(PAD.ping)) { if (e.mapOpen && e.mapCur) pingAt(e, e.mapCur.x, e.mapCur.y); else pingAhead(e); }
+      if (I.hit(PAD.ping)) pingAhead(e);
       if (I.hit(PAD.pause)) { pause(); return; }
     }
     if (!padMove && I.touch && sticks.move) {
@@ -5764,7 +5772,7 @@
     ctx.font = '600 10px "IBM Plex Mono", monospace';
     ctx.fillStyle = 'rgba(241,231,208,.7)';
     ctx.fillText(usingPad(e)
-      ? 'LEFT STICK PICKS  \u00b7  B DROPS  \u00b7  L3 CLOSES'
+      ? 'LEFT STICK PICKS  \u00b7  B DROPS  \u00b7  X OR L3 CLOSES'
       : 'ARROWS PICK  \u00b7  Z DROPS  \u00b7  TAB CLOSES', bx + W / 2, by + H - 18);
     ctx.restore();
     if (e === kbPlayer()) invRect = { x: VX + bx, y: VY + by + 44, w: W, rh: RH, n: rows.length };
@@ -5801,7 +5809,7 @@
     ctx.font = '600 11px "IBM Plex Mono", monospace';
     ctx.fillStyle = 'rgba(241,231,208,.75)';
     ctx.fillText(usingPad(player)
-      ? 'LEFT STICK MOVES THE CURSOR  \u00b7  D-PAD DOWN MARKS  \u00b7  BACK CLOSES'
+      ? 'LEFT STICK MOVES THE CURSOR  \u00b7  D-PAD DOWN MARKS  \u00b7  B OR BACK CLOSES'
       : 'CLICK TO MARK  \u00b7  M CLOSES', cw / 2, by + S + 20);
     ctx.restore();
   }
@@ -7341,6 +7349,25 @@
       if (padHit(PAD.swapL)) specCycle(player, -1);
       if (padHit(PAD.swapR)) specCycle(player, 1);
     }
+    // the kit and the map are drawn on this machine, so they open and close here
+    if (player && pad && !netGuestPaused && state === 'play') {
+      if (padHit(PAD.inv)) { player.invOpen = !player.invOpen; player.invSel = 0; }
+      if (padHit(PAD.map)) { player.mapOpen = !player.mapOpen; player.mapCur = null; }
+      if (player.invOpen) {
+        var giy = padAxis(1);
+        player.invT = Math.max(0, (player.invT || 0) - dt);
+        if (Math.abs(giy) > 0.55 && player.invT <= 0) { invMove(player, giy > 0 ? 1 : -1); player.invT = 0.18; }
+        if (padHit(PAD.drop)) invDrop(player);
+        if (padHit(PAD.pickup)) player.invOpen = false;
+      } else if (player.mapOpen) {
+        var gspan = MAP_W * TILE, gtall = MAP_H * TILE;
+        if (!player.mapCur) player.mapCur = { x: player.x, y: player.y };
+        player.mapCur.x = clamp(player.mapCur.x + padAxis(0) * gspan * 0.4 * dt, 0, gspan);
+        player.mapCur.y = clamp(player.mapCur.y + padAxis(1) * gtall * 0.4 * dt, 0, gtall);
+        if (padHit(PAD.ping)) pingAt(player, player.mapCur.x, player.mapCur.y);
+        if (padHit(PAD.drop)) player.mapOpen = false;
+      } else if (padHit(PAD.ping)) pingAhead(player);
+    }
     while (netQueue.length) applySnap(netQueue.shift());
     if (!player) return;
     var i;
@@ -7418,6 +7445,7 @@
         var ml = Math.sqrt(mx * mx + my * my);
         if (ml > 1) { mx /= ml; my /= ml; }
       }
+      if (padActive() && (player.invOpen || player.mapOpen)) { mx = 0; my = 0; }
       if (aim === null && !padActive()) aim = Math.atan2(mouse.wy - player.y, mouse.wx - player.x);
       if (keys['shift']) down |= 1 << PAD.sprint;
       if (mouse.down) down |= 1 << 7;
