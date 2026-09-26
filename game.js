@@ -584,7 +584,7 @@
 
   // You see what is in front of you, plus a little circle right around you
   // (you would feel someone at your back). Bots get the same eyes.
-  var FOV_HALF = 0.96, NEAR_SEE = 60;
+  var FOV_HALF = CG_MODE ? 1.28 : 0.96, NEAR_SEE = CG_MODE ? 120 : 60;
   function inCone(e, x, y, half) {
     var dx = x - e.x, dy = y - e.y;
     if (dx * dx + dy * dy <= NEAR_SEE * NEAR_SEE) return true;
@@ -1209,6 +1209,9 @@
   var BASE_SKIN = 9;
   var WALLET = { coins: 0, owned: [BASE_SKIN], skin: BASE_SKIN };
   var CG_MODE = window.DEAD_ANGLE_PLATFORM === 'crazygames';
+  // CrazyGames is a PEGI 12 site with a lot of daylight games on it. Their
+  // build keeps the same fight but loses the blood and opens the view up.
+  var GORE = !CG_MODE;
   var CG = null;                          // the CrazyGames SDK, once it is ready
   function storeGet(k) {
     try {
@@ -2261,7 +2264,7 @@
   }
   function bloodOf(e) { return (e && isZombie(e)) ? 'zomb' : 'red'; }
   function addSplat(x, y, r, pal, kind) {
-    if (!SET.blood) return;
+    if (!SET.blood || !GORE) return;
     if (splats.length >= SPLAT_MAX) splats.shift();
     splats.push({ x: x, y: y, r: r, ang: Math.random() * 6.2832, v: rnd(6), pal: pal, t: 0,
                   grow: kind === 'pool' ? 2.4 : 0.12, kind: kind || 'drop' });
@@ -2269,7 +2272,7 @@
   // x, y: where; ang: the way the round was travelling; amount: how hard
   function bleed(x, y, ang, amount, big, pal) {
     if (netRole === 'host' && netHostLive()) netEv.push(['g', Math.round(x), Math.round(y), +(ang || 0).toFixed(2), Math.round(amount), big ? 1 : 0, pal || 'red']);
-    if (!SET.blood) { spark(x, y, big ? 10 : 4, '170,150,150', 120); return; }
+    if (!SET.blood || !GORE) { spark(x, y, big ? 10 : 4, '196,204,214', 120); return; }
     pal = pal || 'red';
     if (ang === undefined || ang === null || isNaN(ang)) ang = Math.random() * 6.2832;
     var n = Math.min(26, 4 + Math.round(amount / 5) + (big ? 12 : 0));
@@ -2630,7 +2633,7 @@
     if (e.bot) { e.flinch = 0.35; if (e.aimOff !== undefined) e.aimOff += rr(-0.06, 0.06); }
     bleed(e.x, e.y, ang, amount, false, bloodOf(e));
     e.lastHitAng = ang;
-    if (FX.blood && SET.blood && amount >= 30) {
+    if (FX.blood && SET.blood && GORE && amount >= 30) {
       if (decals.length > 90) decals.shift();
       decals.push({
         x: e.x + Math.cos(ang) * 5, y: e.y + Math.sin(ang) * 5,
@@ -2683,7 +2686,7 @@
     corpses.push({ x: e.x, y: e.y });
     bleed(e.x, e.y, e.lastHitAng, 60, true, bloodOf(e));
     audioEmit(e.x, e.y, DEATH_SND, -1);
-    if (FX.death && SET.blood) {
+    if (FX.death && SET.blood && GORE) {
       if (deaths.length > 60) deaths.shift();
       deaths.push({ x: e.x, y: e.y, ang: Math.random() * 6.2832, t: 0, scale: rr(0.95, 1.25) });
     }
@@ -4766,8 +4769,8 @@
     var grassy = (mapKind === 'world' && mode !== 'duel');
     var packed = PACK_READY && PACK && !grassy;
     if (packed) {
-      tilePass(r0, r1, t0, t1, true, false, 0, '#0b1016');
-      tilePass(r0, r1, t0, t1, true, true, 0, '#141d27');
+      tilePass(r0, r1, t0, t1, true, false, 0, CG_MODE ? '#131c26' : '#0b1016');
+      tilePass(r0, r1, t0, t1, true, true, 0, CG_MODE ? '#202d3c' : '#141d27');
     } else if (grassy) {
       tilePass(r0, r1, t0, t1, true, false, 0, groundDim);
       tilePass(r0, r1, t0, t1, true, true, 1, '#221e18');
@@ -4948,7 +4951,7 @@
     var g = ctx.createRadialGradient(player.x, player.y, VR * 0.18, player.x, player.y, VR);
     g.addColorStop(0, 'rgba(4,6,10,0)');
     g.addColorStop(0.62, 'rgba(4,6,10,.28)');
-    g.addColorStop(1, 'rgba(4,6,10,.93)');
+    g.addColorStop(1, CG_MODE ? 'rgba(4,6,10,.74)' : 'rgba(4,6,10,.93)');
     ctx.fillStyle = g;
     ctx.fillRect(player.x - VR, player.y - VR, VR * 2, VR * 2);
 
@@ -6350,7 +6353,7 @@
     kbmLast = performance.now();
     var k = keyOf(e);
     keys[k] = true;
-    if (netRole && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden && !(player && player.invOpen)) { e.preventDefault(); openIgChat(); return; }
+    if (netRole && !cgNoChat() && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden && !(player && player.invOpen)) { e.preventDefault(); openIgChat(); return; }
     if (netGuest && state === 'play') {
       var GB = { 'e': PAD.pickup, ' ': PAD.jump, 'v': PAD.melee, 'x': PAD.giveup, 'r': PAD.reload, 'f': PAD.stim,
                  'h': PAD.smoke, 'g': PAD.frag, 'q': PAD.swapL, '1': PAD.swapL, '2': PAD.swapL, 'z': PAD.drop };
@@ -7477,7 +7480,8 @@
     ev.stopPropagation();
     if (ev.key === 'Enter') joinGame(this.value);
   });
-  $('netBack').addEventListener('click', function () { $('online').hidden = true; elMenu.hidden = false; syncMenu(); });
+  $('netBack').addEventListener('click', function () {
+    quickStand(); $('online').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('netLeave').addEventListener('click', function () { netClose('Disconnected.'); });
 
   // ---------------------------------------------------------------- crazygames
@@ -7490,7 +7494,7 @@
     if (what === 'gameplayStop') { if (!cgPlaying) return; cgPlaying = false; }
     cgCall(function (c) { if (c.game && c.game[what]) c.game[what](); });
   }
-  function cgNoChat() { return !!cgSet.disableChat; }
+  function cgNoChat() { return CG_MODE || !!cgSet.disableChat; }
   function cgApply(st) {
     cgSet = st || cgSet;
     muted = !!cgSet.muteAudio;
@@ -7540,6 +7544,8 @@
     acctName = 'GUEST' + (1000 + rnd(9000));
     $('acctBtn').hidden = true;
     $('friendsBtn').hidden = true;
+    if ($('chatHint')) $('chatHint').hidden = true;
+    if ($('bloodRow')) $('bloodRow').hidden = true;
     $('acctName').textContent = acctName;
     var sdk = window.CrazyGames && window.CrazyGames.SDK;
     if (!sdk) { cgLand(); return; }                        // blocked (ad blocker): play on regardless
@@ -7976,6 +7982,27 @@
   }
 
   // ---- quick play ----
+  // Whatever goes wrong out there - the broker down, their sandbox blocking
+  // it, an empty site - the button has to end in a match rather than a
+  // spinner. The clock starts when the player clicks and nothing inside the
+  // online code can push it back, because all of that is what might be stuck.
+  var QUICK_WAIT = 12000, quickAt = 0, quickTimer = 0;
+  function quickStand() { clearInterval(quickTimer); quickTimer = 0; }
+  function quickBegin() {
+    quickAt = performance.now();
+    clearInterval(quickTimer);
+    quickTimer = setInterval(function () {
+      if (state === 'play' || state === 'paused') { quickStand(); return; }
+      // a lobby is really holding a seat for us: it starts the match itself
+      if (queueOn && netRole === 'host') { quickStand(); return; }
+      if (netGuest && netConn && netConn.open) { quickStand(); return; }
+      if (performance.now() - quickAt < QUICK_WAIT) return;
+      quickStand();
+      quickStatus('No match to join - starting one with bots.');
+      if (netRole) netClose('');
+      setTimeout(function () { if (state !== 'play') startMatch(); }, 700);
+    }, 400);
+  }
   function quickPlay() {
     if (CG_MODE && !fbUser) {
       openOnline();
@@ -8070,7 +8097,7 @@
   $('acctLogin').addEventListener('click', logIn);
   $('acctSignup').addEventListener('click', signUp);
   $('acctBack').addEventListener('click', closeAccount);
-  $('quickBtn').addEventListener('click', quickPlay);
+  $('quickBtn').addEventListener('click', function () { quickBegin(); quickPlay(); });
   $('friendAdd').addEventListener('click', addFriend);
   $('chatSend').addEventListener('click', sendChat);
   $('chatBack').addEventListener('click', closeChat);
