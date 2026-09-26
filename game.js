@@ -7125,7 +7125,11 @@
     if (netRole === 'host') partySay(acctName || 'HOST', text);
     else netSend({ t: 'pchat', text: text.slice(0, 120) });
   }
-  function cleanText(t) { return typeof clean === 'function' ? clean(t) : t; }
+  function cleanText(t) {
+    // nothing that carries players off the site
+    t = String(t || '').replace(/(?:https?:\/\/|www\.)\S+/gi, '[link]');
+    return typeof clean === 'function' ? clean(t) : t;
+  }
   function pchatVisible() {
     var box = $('partyChat');
     if (box) box.hidden = cgNoChat() || !(netRole === 'guest' || (netRole === 'host' && netGuests.length > 0));
@@ -7494,7 +7498,7 @@
     if (what === 'gameplayStop') { if (!cgPlaying) return; cgPlaying = false; }
     cgCall(function (c) { if (c.game && c.game[what]) c.game[what](); });
   }
-  function cgNoChat() { return CG_MODE || !!cgSet.disableChat; }
+  function cgNoChat() { return !!cgSet.disableChat; }
   function cgApply(st) {
     cgSet = st || cgSet;
     muted = !!cgSet.muteAudio;
@@ -7544,7 +7548,6 @@
     acctName = 'GUEST' + (1000 + rnd(9000));
     $('acctBtn').hidden = true;
     $('friendsBtn').hidden = true;
-    if ($('chatHint')) $('chatHint').hidden = true;
     if ($('bloodRow')) $('bloodRow').hidden = true;
     $('acctName').textContent = acctName;
     var sdk = window.CrazyGames && window.CrazyGames.SDK;
