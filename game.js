@@ -4456,6 +4456,8 @@
       noOverlay = true;
       return true;
     },
+    // draw one frame on demand: the pane throttles rAF when it is hidden
+    draw: function () { render(); return true; },
     uiStep: function (dt) { uiPad(dt || 0.05); if (netRole === 'host') netHostTick(dt || 0.05); return document.activeElement ? (document.activeElement.id || document.activeElement.textContent.trim().slice(0, 24)) : null; },
     tutInfo: function () {
       return { step: tut.i, item: tut.item && loot.indexOf(tut.item) >= 0 ? [Math.round(tut.item.x), Math.round(tut.item.y)] : null };
