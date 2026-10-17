@@ -109,7 +109,7 @@
   var elSlot = [$('slot0'), $('slot1')];
   var elRelBar = $('relBar'), elRelFill = $('relFill');
 
-  var cw = 0, ch = 0, dpr = 1, zoom = 1, zoom0 = 1;
+  var cw = 0, ch = 0, dpr = 1, zoom = 1, zoom0 = 1, uiS = 1;
   // The sniper is the long-range gun, so holding one opens the view up: twice
   // the sight, and the camera pulls back by the same amount so you can use it.
   var SNIPE_SIGHT = 2, VIEW_MUL = 1;
@@ -133,6 +133,9 @@
     canvas.width = Math.max(1, Math.round(cw * dpr));
     canvas.height = Math.max(1, Math.round(ch * dpr));
     zoom = zoom0 = Math.max(0.55, Math.min(2.4, Math.min(cw, ch) / (VIEW_BASE * 2)));
+    // the HUD grows with the screen, so it reads the same at 1080p as at 720p
+    uiS = clamp(ch / 720, 1, 1.6);
+    document.documentElement.style.setProperty('--ui', uiS.toFixed(3));
   }
   window.addEventListener('resize', resize);
 
@@ -5402,6 +5405,14 @@
       var d = Math.round(dist(t, player));
       sx = clamp(sx, pad, cw - pad);
       sy = clamp(sy, pad, ch - pad);
+      if (off && !splitOn) {
+        // keep clear of the health and weapon blocks, and of the minimap
+        if (sx < cw * 0.3 || sx > cw * 0.7) sy = Math.min(sy, ch - 150 * uiS);
+        if (SET.minimap) {
+          var mr = miniRect();
+          if (sx < mr.x + mr.S + 36 && sy > mr.y - 36 && sy < mr.y + mr.S + 44) sy = mr.top ? mr.y + mr.S + 44 : mr.y - 36;
+        }
+      }
       ctx.fillStyle = tint;
       ctx.strokeStyle = '#0d0f12';
       var pulse = 1 + Math.sin(performance.now() / 260 + m) * 0.12;
@@ -5878,9 +5889,16 @@
   }
 
   var mapRect = null;
+  // On short screens the minimap moves up to the top-left corner, so it
+  // does not stack on the health block.
+  function miniRect() {
+    var S = Math.round(Math.min(148 * uiS, Math.min(cw, ch) * (ch < 600 ? 0.25 : 0.30)));
+    if (ch < 600 && !splitOn) return { x: 16, y: mode === 'tut' ? 60 : 16, S: S, top: true };
+    return { x: 16, y: Math.max(60, ch - S - (splitOn ? 78 : 158 * uiS)), S: S, top: false };
+  }
   function drawMinimap() {
-    var S = Math.round(Math.min(148, Math.min(cw, ch) * 0.30));
-    drawMapInto(16, Math.max(60, ch - S - (splitOn ? 78 : 158)), S, false);
+    var r = miniRect();
+    drawMapInto(r.x, r.y, r.S, false);
   }
   // The whole map, for reading the ground and dropping a mark on it.
   function drawBigMap() {

@@ -22,7 +22,7 @@
   --ink:#0a0f16;
   --slate:#18212e;
   --line:#2c3d52;
-  --dim:#5d7288;
+  --dim:#8296ab;
   --text:#c6d4e3;
   --cyan:#7ce7d8;
   --amber:#ffc95e;
@@ -67,6 +67,8 @@ body{margin:0;background:var(--void);color:var(--text);font-family:var(--font-d)
 .feed div.you{border-right-color:var(--cyan)}
 .feed div.you b{color:var(--cyan)}
 
+.hud-top,.feed,.hud-bot{zoom:var(--ui,1)}
+.hud.split .hud-top,.hud.split .feed{zoom:1}
 .hud.split .hud-bot{display:none}
 .hud.split .feed{top:58px}
 .hud-bot{position:absolute;left:calc(16px + env(safe-area-inset-left,0px));right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
