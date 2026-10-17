@@ -4112,7 +4112,7 @@
     } else if (mode === 'tut') {
       elAlive.textContent = Math.min(tut.i + 1, TUT.length) + '/' + TUT.length;
       elZone.className = 'zone-line';
-      elZone.textContent = 'ESC OR P TO LEAVE';
+      elZone.textContent = 'P TO LEAVE';
     } else if (mode === 'duel') {
       elAlive.textContent = score[player.team] + ' \u2013 ' + score[1 - player.team];
       elZone.className = 'zone-line';
@@ -6462,7 +6462,7 @@
       var kp = kbPlayer();
       if (!kp.alive && kp.spec && (k === 'a' || k === 'd')) { specCycle(kp, k === 'a' ? -1 : 1); return; }
       if (kp.air === 'plane' && (k === 'e' || k === ' ')) kp.jumpReq = true;
-      if (kp.air) { if (k === 'escape') pause(); return; }
+      if (kp.air) { if (k === 'escape' || k === 'p') pause(); return; }
       if (k === 'r') startReload(kp);
       else if (k === 'e') playerPickup(kp);
       else if (k === 'q') swapSlot(undefined, kp);
