@@ -6464,10 +6464,22 @@
     }
     if (blackout) t += '  \u2014  BLACKOUT: your eyes reach barely past your own feet. Sound tells you roughly where someone is; the flash of their gun is the only thing that tells you exactly.';
     $('modeDesc').textContent = t;
+    var sum = [MODE_LABEL[mode]];
+    if (mode !== 'duel') sum.push(mapKind === 'world' ? 'World' : 'CQB');
+    if (!MODES[mode].teams) sum.push(squad > 1 ? 'Duos' : 'Solo');
+    if (blackout) sum.push('Blackout');
+    $('modeSum').textContent = sum.join(' · ');
     if (netRole === 'guest') { $('startBtn').textContent = 'WAITING FOR HOST'; return; }
-    $('startBtn').textContent = mode === 'br' ? 'DROP IN'
-      : (mode === 'duel' ? 'FIGHT' : (mode === 'gun' ? 'START LADDER' : 'DEPLOY'));
+    $('startBtn').textContent = 'PLAY';
   }
+  // the match options fold away so PLAY is the first thing on the menu
+  $('optBtn').addEventListener('click', function () {
+    var box = $('opts'), open = box.hidden;
+    box.hidden = !open;
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('optPlay').addEventListener('click', function () { $('startBtn').click(); });
   $('squadRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
     if (!b) return;
