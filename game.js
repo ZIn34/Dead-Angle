@@ -1955,52 +1955,23 @@
   // A small arena, three standing targets, and one thing to learn at a time.
   // Each step waits for you to actually do it.
   var tut = { i: 0, t: 0, moved: 0, sprint: 0, kills: 0, lx: 0, ly: 0, slotWas: 0, flash: 0 };
+  // Five steps: the basics, then straight into a match. Everything else
+  // (sprint, frags, smoke, stims, melee) sits on the HUD and the menu.
   var TUT = [
     { title: 'MOVE', k: 'Walk around', p: 'Walk around', g: { wasd: 1 }, gp: { caps: ['LEFT STICK'] },
       done: function () { return tut.moved > 260; } },
-    { title: 'AIM', k: 'You always face the cursor', p: 'You face where the stick points',
-      g: { mouse: 'move' }, gp: { caps: ['RIGHT STICK'] },
-      done: function () { return tut.t > 2.5; } },
-    { title: 'SHOOT', k: 'Shoot a target', p: 'Shoot a target', mark: 'targets',
+    { title: 'SHOOT', k: 'Aim with the mouse and shoot a target', p: 'Aim with the right stick and shoot a target', mark: 'targets',
       g: { mouse: 'left' }, gp: { caps: ['RT'] },
       done: function () { return tut.hits >= 1; } },
-    { title: 'RELOAD', k: 'Reload', p: 'Reload', g: { caps: ['R'] }, gp: { caps: ['A'] },
-      start: function () { var sl = curSlot(player); if (sl) sl.ammo = Math.min(sl.ammo, 4); },
-      done: function () { return player.reloadT > 0; } },
     { title: 'PICK UP', k: 'Take the rifle', p: 'Take the rifle', mark: 'item',
       g: { caps: ['E'] }, gp: { caps: ['X'] },
       start: function () { tutDrop('gun', 'silenced'); },
       done: function () { return hasGun(player, 'silenced'); } },
-    { title: 'SWAP', k: 'Swap weapons', p: 'Swap weapons',
-      g: { caps: ['Q', '1', '2'] }, gp: { caps: ['LB', 'RB'] },
-      start: function () { tut.slotWas = player.slot; },
-      done: function () { return player.slot !== tut.slotWas; } },
-    { title: 'SPRINT', k: 'Hold it while walking - fast, but loud', p: 'Hold it while walking - fast, but loud',
-      g: { caps: ['SHIFT'] }, gp: { caps: ['LT'] },
-      done: function () { return tut.sprint > 1.2; } },
-    { title: 'FRAG', k: 'Throw a frag at the group', p: 'Throw a frag at the group', mark: 'targets',
-      g: { caps: ['G'] }, gp: { caps: ['D-PAD LEFT'] },
-      start: function () { player.nades = Math.max(player.nades, 1); tut.have = player.nades; },
-      done: function () { return player.nades < tut.have; } },
-    { title: 'SMOKE', k: 'Throw smoke - nobody sees through it', p: 'Throw smoke - nobody sees through it',
-      g: { caps: ['H'] }, gp: { caps: ['D-PAD RIGHT'] },
-      start: function () { player.smokes = Math.max(player.smokes, 1); tut.have = player.smokes; },
-      done: function () { return player.smokes < tut.have; } },
-    { title: 'HEAL', k: 'You are hurt - use a stim', p: 'You are hurt - use a stim',
-      g: { caps: ['F'] }, gp: { caps: ['Y'] },
-      start: function () { player.hp = Math.min(player.hp, 45); player.meds = Math.max(player.meds, 1); tut.have = player.meds; },
-      done: function () { return player.meds < tut.have; } },
-    { title: 'MELEE', k: 'Swing the gun butt - works with no ammo', p: 'Swing the gun butt - works with no ammo',
-      g: { caps: ['V'] }, gp: { caps: ['D-PAD UP'] },
-      done: function () { return player.meleeT > 0; } },
-    { title: 'LISTEN', k: 'Every shot and footstep makes noise, and bots hunt by ear. In BLACKOUT you only see sound rings - a muzzle flash is the one exact giveaway.',
-      p: null, wait: 7, done: function () { return tut.t > 7; } },
-    { title: 'TEAM UP', k: 'In squad and team modes, stand beside a downed teammate to revive them. Blue markers are always your side.',
-      p: null, wait: 7, done: function () { return tut.t > 7; } },
-    { title: 'DROP IN', k: 'Battle royale starts in a plane: SPACE to jump, then steer your chute with W A S D. Stay inside the closing ring.',
-      p: 'Battle royale starts in a plane: A to jump, then steer your chute with the LEFT STICK. Stay inside the closing ring.',
-      wait: 8, done: function () { return tut.t > 8; } },
-    { title: 'READY', k: 'That is everything.', p: 'That is everything.',
+    { title: 'RELOAD', k: 'Reload', p: 'Reload', g: { caps: ['R'] }, gp: { caps: ['A'] },
+      start: function () { var sl = curSlot(player); if (sl) sl.ammo = Math.min(sl.ammo, 4); },
+      done: function () { return player.reloadT > 0; } },
+    { title: 'READY', k: 'That is the basics. Frags, smoke and stims are on the HUD; the menu lists every control. Your first match starts now.',
+      p: 'That is the basics. Frags, smoke and stims are on the HUD; the menu lists every control. Your first match starts now.',
       g: { caps: ['ENTER'] }, gp: { caps: ['A'] },
       last: true, done: function () { return false; } }
   ];
@@ -2064,7 +2035,7 @@
     if (st.last) {
       var go = !!keys['enter'] || padDown(0);
       // leave after this frame finishes - the rest of it still expects a tutorial
-      if (go && !tutEnterPrev) { tut.leaving = true; setTimeout(tutDone, 0); }
+      if ((go && !tutEnterPrev) || tut.t > 4) { tut.leaving = true; setTimeout(function () { tutDone(true); }, 0); }
       tutEnterPrev = go;
       return;
     }
@@ -2081,16 +2052,18 @@
     setTimeout(tutDone, 0);
   }
   if ($('tutSkip')) $('tutSkip').addEventListener('click', tutLeave);
-  function tutDone() {
+  function tutDone(play) {
     storeSet('earshot.tutDone', '1');
     goHome();
     syncTutBtn();
+    // finished (not skipped): straight on into a match
+    if (play === true) setTimeout(function () { if (state === 'menu') $('startBtn').click(); }, 0);
   }
   function syncTutBtn() {
     var done = false;
     done = storeGet('earshot.tutDone') === '1';
     var b = $('tutBtn');
-    if (b) { b.className = done ? 'go ghost' : 'go'; b.textContent = done ? 'TUTORIAL' : 'TUTORIAL \u2014 START HERE'; }
+    if (b) { b.className = 'go ghost'; b.textContent = done ? 'TUTORIAL' : 'TUTORIAL \u2014 START HERE'; }
   }
   // A key cap, drawn the way it looks under a finger. Showing the control
   // beats another sentence about it.
@@ -2120,18 +2093,28 @@
     capBox('A', cx - 40, y + 34); capBox('S', cx, y + 34); capBox('D', cx + 40, y + 34);
   }
   function mouseGlyph(cx, y, kind) {
-    var w = 30, h = 42, x = cx - w / 2;
-    ctx.fillStyle = '#f1e7d0'; ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 3;
-    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    var w = 30, h = 42, x = cx - w / 2, r = w / 2;
+    // a mouse: round on top, a little flatter underneath
+    var body = new Path2D();
+    body.moveTo(x, y + r);
+    body.arc(cx, y + r, r, Math.PI, 0);
+    body.lineTo(x + w, y + h - 11);
+    body.quadraticCurveTo(x + w, y + h, cx, y + h);
+    body.quadraticCurveTo(x, y + h, x, y + h - 11);
+    body.closePath();
+    ctx.fillStyle = '#f1e7d0'; ctx.fill(body);
     if (kind === 'left') {                       // the button you press, lit
+      ctx.save(); ctx.clip(body);
       ctx.fillStyle = '#f2bd1d';
-      ctx.fillRect(x + 2, y + 2, w / 2 - 3, h / 3 - 1);
+      ctx.fillRect(x, y, w / 2, h * 0.42);
+      ctx.restore();
     }
     ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(x, y + h / 3); ctx.lineTo(x + w, y + h / 3);
-    ctx.moveTo(cx, y); ctx.lineTo(cx, y + h / 3);
+    ctx.moveTo(x, y + h * 0.42); ctx.lineTo(x + w, y + h * 0.42);
+    ctx.moveTo(cx, y); ctx.lineTo(cx, y + h * 0.42);
     ctx.stroke();
+    ctx.lineWidth = 3; ctx.stroke(body);
     if (kind === 'move') {                       // a nudge either way
       ctx.strokeStyle = '#f2bd1d'; ctx.lineWidth = 3;
       ctx.beginPath();
