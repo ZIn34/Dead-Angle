@@ -132,7 +132,7 @@
     ch = canvas.clientHeight || window.innerHeight;
     canvas.width = Math.max(1, Math.round(cw * dpr));
     canvas.height = Math.max(1, Math.round(ch * dpr));
-    zoom = zoom0 = Math.max(0.55, Math.min(2.4, Math.min(cw, ch) / (VIEW_BASE * 2 + 60)));
+    zoom = zoom0 = Math.max(0.55, Math.min(2.4, Math.min(cw, ch) / (VIEW_BASE * 2)));
   }
   window.addEventListener('resize', resize);
 
@@ -1079,6 +1079,43 @@
     }
     ctx.fillStyle = style;
     ctx.fill();
+  }
+
+  // Ground you have seen but cannot see now: the same floor tiles and the same
+  // gold-edged walls as in the light, dimmed, so the map reads as a place
+  // rather than flat blocks.
+  // a faint diagonal hatch over the tops of walls, so they read as solid mass
+  var wallHatch = null;
+  function hatch() {
+    if (wallHatch) return wallHatch;
+    var c = document.createElement('canvas'); c.width = c.height = 10;
+    var g = c.getContext('2d');
+    g.strokeStyle = 'rgba(200,220,240,.07)'; g.lineWidth = 1.4;
+    g.beginPath(); g.moveTo(-2, 12); g.lineTo(12, -2); g.moveTo(8, 12); g.lineTo(12, 8); g.moveTo(-2, 2); g.lineTo(2, -2); g.stroke();
+    wallHatch = ctx.createPattern(c, 'repeat');
+    return wallHatch;
+  }
+  function drawMemory(r0, r1, t0, t1) {
+    var ty, tx, i;
+    tilePass(r0, r1, t0, t1, true, false, 0, floorPat || '#1a2531');
+    tilePass(r0, r1, t0, t1, true, false, 0, 'rgba(5,9,14,.74)');
+    tilePass(r0, r1, t0, t1, true, true, 0, '#1b2735');
+    tilePass(r0, r1, t0, t1, true, true, 0, hatch());
+    var shade = new Path2D(), edge = new Path2D(), lip = new Path2D(), sh = TILE * 0.32;
+    for (ty = r0; ty <= r1; ty++) for (tx = t0; tx <= t1; tx++) {
+      i = ty * STRIDE + tx;
+      if (!explored[i] || grid[i] !== 1) continue;
+      var x = tx * TILE, y = ty * TILE;
+      var up = ty > 0 && grid[i - STRIDE] !== 1, dn = ty < MAP_H - 1 && grid[i + STRIDE] !== 1;
+      var lf = tx > 0 && grid[i - 1] !== 1, rt = tx < MAP_W - 1 && grid[i + 1] !== 1;
+      if (dn) { shade.rect(x, y + TILE, TILE, sh); edge.moveTo(x, y + TILE); edge.lineTo(x + TILE, y + TILE); }
+      if (rt) { shade.rect(x + TILE, y, sh, TILE); edge.moveTo(x + TILE, y); edge.lineTo(x + TILE, y + TILE); }
+      if (up) { edge.moveTo(x, y); edge.lineTo(x + TILE, y); lip.rect(x, y, TILE, TILE * 0.18); }
+      if (lf) { edge.moveTo(x, y); edge.lineTo(x, y + TILE); }
+    }
+    ctx.fillStyle = 'rgba(0,0,0,.32)'; ctx.fill(shade);
+    ctx.fillStyle = 'rgba(120,150,180,.07)'; ctx.fill(lip);
+    ctx.strokeStyle = 'rgba(242,189,29,.26)'; ctx.lineWidth = 1.6 / zoom; ctx.stroke(edge);
   }
 
   var exploreTick = 0;
@@ -2624,6 +2661,8 @@
     if (godMode && e === player) return;
     e.hp -= amount;
     e.useT = 0;
+    e.hitAt = performance.now();
+    if (hitBy && hitBy !== e && hitBy.local) { hitBy.hmAt = e.hitAt; hitBy.hmKill = e.hp <= 0; }
     // shot down to half or worse: bleeding until a stim closes it up
     if (e.hp > 0 && e.hp <= 50 && !isZombie(e) && hitBy && hitBy !== e && !e.down) {
       if (!e.bleeding && e.local) feed('<b>BLEEDING</b> - use a stim', true);
@@ -4770,10 +4809,8 @@
     // The world map keeps its dirt; everywhere else takes the pack's tiles.
     var grassy = (mapKind === 'world' && mode !== 'duel');
     var packed = PACK_READY && PACK && !grassy;
-    if (packed) {
-      tilePass(r0, r1, t0, t1, true, false, 0, CG_MODE ? '#131c26' : '#0b1016');
-      tilePass(r0, r1, t0, t1, true, true, 0, CG_MODE ? '#202d3c' : '#141d27');
-    } else if (grassy) {
+    if (packed) drawMemory(r0, r1, t0, t1);
+    else if (grassy) {
       tilePass(r0, r1, t0, t1, true, false, 0, groundDim);
       tilePass(r0, r1, t0, t1, true, true, 1, '#221e18');
       tilePass(r0, r1, t0, t1, true, true, 2, '#121806');
@@ -4808,6 +4845,7 @@
     if (packed) {
       tilePass(r0, r1, t0, t1, false, false, 0, floorPat || '#24313f');
       tilePass(r0, r1, t0, t1, false, true, 0, PACK.navy);
+      tilePass(r0, r1, t0, t1, false, true, 0, hatch());
     } else if (grassy) {
       tilePass(r0, r1, t0, t1, false, false, 0, groundLit);
       tilePass(r0, r1, t0, t1, false, true, 1, '#6a6053');
@@ -5129,6 +5167,16 @@
       ctx.fillStyle = 'rgba(' + tint + ',' + (e === player ? '.40' : '.36') + ')';
       ctx.beginPath(); ctx.ellipse(e.x, e.y, e.r * 1.35, e.r * 1.35, 0, 0, 6.2832); ctx.fill();
       drawPacked(e);
+      var fl = e.hitAt ? (performance.now() - e.hitAt) / 140 : 1;
+      if (fl < 1) {
+        ctx.fillStyle = 'rgba(255,246,230,' + (0.55 * (1 - fl)).toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (1.2 + fl * 0.5), 0, 6.2832); ctx.fill();
+      }
+      if (e === player) {
+        ctx.strokeStyle = 'rgba(124,231,216,.75)';
+        ctx.lineWidth = 2 / zoom;
+        ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 1.75, 0, 6.2832); ctx.stroke();
+      }
       if (e.swingT > 0) {
         var sw2 = 1 - e.swingT / 0.18;
         ctx.strokeStyle = 'rgba(214,228,242,' + (0.75 * (1 - sw2)).toFixed(3) + ')';
@@ -5225,10 +5273,13 @@
     if (noOverlay) return;
     var on = usingPad(player);
     var hideC = splitOn ? usingPad(kbPlayer()) : on;
+    var drawC = !on && !splitOn && !touchMode && mouse.sx !== undefined;
+    hideC = hideC || drawC;
     if (cursorHidden !== hideC) {
       cursorHidden = hideC;
       canvas.style.cursor = hideC ? 'none' : 'crosshair';
     }
+    if (drawC) { drawCrosshair(mouse.sx - VX, mouse.sy - VY); return; }
     if (!on || !player.alive || player.down) return;
     var maxD = Math.min(cw, ch) * 0.5 / zoom;
     var cx3 = Math.cos(player.ang), cy3 = Math.sin(player.ang);
@@ -5252,6 +5303,39 @@
     ctx.strokeStyle = 'rgba(124,231,216,.32)';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(sx3, sy3, 7.5, 0, 6.2832); ctx.stroke();
+  }
+
+  function drawCrosshair(x, y) {
+    var hm = player.hmAt ? (performance.now() - player.hmAt) / (player.hmKill ? 420 : 220) : 1;
+    var w = curW(player), sl = curSlot(player);
+    var gap = 5 + (player.animFire > 0 ? 4 : 0), len = 6;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (var pass = 0; pass < 2; pass++) {
+      ctx.strokeStyle = pass ? (w && sl.ammo <= 0 ? '#ff4d8d' : '#e8f4f2') : 'rgba(4,6,10,.85)';
+      ctx.lineWidth = pass ? 2 : 4;
+      ctx.beginPath();
+      ctx.moveTo(x - gap - len, y); ctx.lineTo(x - gap, y);
+      ctx.moveTo(x + gap, y); ctx.lineTo(x + gap + len, y);
+      ctx.moveTo(x, y - gap - len); ctx.lineTo(x, y - gap);
+      ctx.moveTo(x, y + gap); ctx.lineTo(x, y + gap + len);
+      ctx.stroke();
+    }
+    if (hm < 1) {
+      var r1 = 7 + hm * 3, r2 = 14 + hm * 3;
+      ctx.globalAlpha = 1 - hm;
+      for (pass = 0; pass < 2; pass++) {
+        ctx.strokeStyle = pass ? (player.hmKill ? '#ff4d5e' : '#ffffff') : 'rgba(4,6,10,.85)';
+        ctx.lineWidth = pass ? 2.4 : 4.4;
+        ctx.beginPath();
+        for (var q = 0; q < 4; q++) {
+          var a = Math.PI / 4 + q * Math.PI / 2, c = Math.cos(a), d = Math.sin(a);
+          ctx.moveTo(x + c * r1, y + d * r1); ctx.lineTo(x + c * r2, y + d * r2);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   function renderPrompt() {
