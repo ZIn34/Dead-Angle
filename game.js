@@ -225,8 +225,18 @@
       music.play().catch(function () {});
     } catch (err) { music = null; }
   }
+  // Sound is held (silent, music paused) while the tab is hidden or an ad plays.
+  var soundHolds = {};
+  function soundHeld() { for (var k in soundHolds) if (soundHolds[k]) return true; return false; }
+  function holdSound(why, on) {
+    soundHolds[why] = !!on;
+    var held = soundHeld();
+    if (music) { if (held) music.pause(); }
+    if (actx) { try { if (held) actx.suspend(); else actx.resume(); } catch (err) {} }
+  }
+  document.addEventListener('visibilitychange', function () { holdSound('hidden', document.hidden); });
   function musicLevel() {
-    if (muted) return 0;
+    if (muted || soundHeld()) return 0;
     var inMatch = state === 'play' || state === 'paused' || state === 'ending';
     return clamp((SET.music / 100) * (SET.vol / 100) * (inMatch ? 0.5 : 1), 0, 1);
   }
@@ -234,7 +244,7 @@
     if (!music) return;
     var want = musicLevel();
     music.volume = clamp(music.volume + (want - music.volume) * 0.06, 0, 1);
-    if (want > 0 && music.paused) music.play().catch(function () {});
+    if (want > 0 && music.paused && !soundHeld()) music.play().catch(function () {});
   }
   // browsers only allow sound after the player has done something
   ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
@@ -309,7 +319,7 @@
 
   function audioEmit(x, y, def, owner) {
     if (netRole === 'host' && netHostLive()) netEv.push(['a', Math.round(x), Math.round(y), netDefId(def), owner]);
-    if (!actx || muted || !player) return;
+    if (!actx || muted || soundHeld() || !player) return;
     if (!def.aud && !def.sample) return;
     // heard from your own spot if it is yours, else from the nearer player
     var oe = owner >= 0 ? ents[owner] : null;
@@ -1674,6 +1684,7 @@
   // ---------------------------------------------------------------- match
   function startMatch() {
     initAudio();
+    if (mode !== 'tut') matchesPlayed++;
     matchToken++;
     MODE = MODES[mode];
     VIEW_R = blackout ? VIEW_BLACKOUT : VIEW_BASE;
@@ -6768,11 +6779,33 @@
     mode = 'tut'; tutRestore = was;
   });
   var tutRestore = null;
+  // ---- CrazyGames midgame ads: only between matches, after one has been
+  // played, at most every three minutes, and never with friends waiting online.
+  var AD_GAP = 180000, adLast = Date.now(), adBusy = false, matchesPlayed = 0;
+  function withBreakAd(go) {
+    if (adBusy) return;
+    var due = CG && CG.ad && matchesPlayed > 0 && !netRole && Date.now() - adLast >= AD_GAP;
+    if (!due) { go(); return; }
+    adBusy = true; adLast = Date.now();
+    var done = false;
+    function after() {
+      if (done) return; done = true;
+      adBusy = false; holdSound('ad', false);
+      go();
+    }
+    try {
+      CG.ad.requestAd('midgame', {
+        adStarted: function () { cgGame('gameplayStop'); holdSound('ad', true); },
+        adFinished: after,
+        adError: after
+      });
+    } catch (err) { after(); }
+  }
   $('startBtn').addEventListener('click', function () {
     if (netRole === 'guest') { openOnline(); return; }         // the host starts
-    startMatch();
+    withBreakAd(startMatch);
   });
-  $('againBtn').addEventListener('click', function () { elOver.hidden = true; startMatch(); });
+  $('againBtn').addEventListener('click', function () { elOver.hidden = true; withBreakAd(startMatch); });
   $('homeBtn').addEventListener('click', function () {
     if (netRole === 'host' && netPublic) hostEndMatch('The host left.');
     goHome();
