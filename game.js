@@ -1658,7 +1658,8 @@
       e.slots = [{ key: 'rifle', ammo: WEAPONS.rifle.mag }, { key: 'pistol', ammo: WEAPONS.pistol.mag }];
       e.slot = 0; e.reserve = 120; e.meds = 1; e.nades = 2; e.smokes = 1;
     } else {
-      e.slots = [null, null]; e.slot = 0; e.reserve = START_RESERVE; e.meds = 0; e.nades = 0; e.smokes = 0;
+      // battle royale: everyone lands with a pistol, so the first fight comes quickly
+      e.slots = [{ key: 'pistol', ammo: WEAPONS.pistol.mag }, null]; e.slot = 0; e.reserve = START_RESERVE; e.meds = 0; e.nades = 0; e.smokes = 0;
     }
   }
   function placeEnt(e, tile) {
@@ -1902,7 +1903,7 @@
       if (!e.alive) continue;
       if (e.air === 'plane') {
         e.x = plane.x; e.y = plane.y;
-        var late = plane.t >= plane.dur * 0.93 || (!inWorld && plane.t > plane.dur * 0.5);
+        var late = plane.t >= dropDeadline() || (!inWorld && plane.t > plane.dur * 0.5);
         if (inWorld && (late || (e.bot && !e.follow && plane.t >= e.dropAt))) jumpOut(e);
         else if (late && !inWorld) {
           // flew past the edge: tip them out over the last stretch of land
@@ -1934,7 +1935,9 @@
 
   // Your own hands in the air: jump from the plane, then steer the chute.
   // the door opens a few seconds in, once the plane is over the island
-  var JUMP_AFTER = 5;
+  var JUMP_AFTER = 2;
+  // everyone still aboard is tipped out a few seconds after the door opens
+  function dropDeadline() { return Math.min(plane.dur * 0.93, JUMP_AFTER + 5); }
   function jumpOpen() { return !!plane && plane.t >= JUMP_AFTER && !!plane.overLand; }
   function airControl(e, I, dt) {
     if (e.air === 'plane') {
@@ -5725,7 +5728,7 @@
     if (!player.alive || !player.air) return;
     var txt, sub2 = null;
     if (player.air === 'plane') {
-      var left = Math.max(0, plane.dur * 0.93 - plane.t);
+      var left = Math.max(0, dropDeadline() - plane.t);
       if (jumpOpen()) {
         txt = promptKey('SPACE', 'A') + '  JUMP';
         sub2 = 'THE PLANE DROPS EVERYONE IN ' + Math.ceil(left) + 's';
@@ -8206,7 +8209,7 @@
     if (queueOn) return humansIn() < queueCap();
     if (state !== 'play' && state !== 'paused') return false;
     if (humansIn() >= Math.min(NET_MAX, fieldN)) return false;
-    if (mode === 'br') return !!plane && plane.t < plane.dur * 0.75;   // only while there are seats on the plane
+    if (mode === 'br') return !!plane && plane.t < dropDeadline() - 1;   // only while there are seats on the plane
     return true;
   }
   function lobbyWrite() {
