@@ -56,14 +56,16 @@
   ];
 
   // Zone radii are fractions of the map's short side, so every map closes well.
+  // About ten minutes from landing to the last circle: long early waits to loot
+  // and roam, then each step comes a little sooner than the one before.
   var PHASES = [
-    { wait: 26, shrink: 16, f: 0.44, dps: 2 },
-    { wait: 17, shrink: 14, f: 0.31, dps: 3 },
-    { wait: 15, shrink: 12, f: 0.21, dps: 5 },
-    { wait: 13, shrink: 11, f: 0.14, dps: 7 },
-    { wait: 11, shrink: 10, f: 0.085, dps: 10 },
-    { wait: 10, shrink: 9,  f: 0.045, dps: 14 },
-    { wait: 9,  shrink: 9,  f: 0.020, dps: 20 }
+    { wait: 80, shrink: 50, f: 0.44, dps: 2 },
+    { wait: 60, shrink: 45, f: 0.31, dps: 3 },
+    { wait: 55, shrink: 40, f: 0.21, dps: 5 },
+    { wait: 50, shrink: 35, f: 0.14, dps: 7 },
+    { wait: 45, shrink: 30, f: 0.085, dps: 10 },
+    { wait: 40, shrink: 25, f: 0.045, dps: 14 },
+    { wait: 35, shrink: 20, f: 0.020, dps: 20 }
   ];
 
   var MODES = {
@@ -2577,7 +2579,7 @@
       bullets.push({
         x: e.x + Math.cos(ang) * muzzle, y: e.y + Math.sin(ang) * muzzle,
         vx: Math.cos(ang) * w.speed, vy: Math.sin(ang) * w.speed,
-        owner: e.id, dmg: w.dmg * (e.bot ? DIFF[difficulty].dmg : 1), life: 1.25
+        owner: e.id, dmg: w.dmg * (e.bot ? DIFF[difficulty].dmg : 1), life: 1.25, gun: slot.key
       });
     }
     slot.ammo--;
@@ -2822,7 +2824,8 @@
     e.meds--; e.useT = 1.6;
   }
 
-  function damage(e, amount, fromId, ang) {
+  var SNIPER_BLEED = { rate: 2, total: 30 };   // a sniper wound kills if left alone
+  function damage(e, amount, fromId, ang, gun) {
     if (!e.alive) return;
     var hitBy = ents[fromId];
     if (hitBy && hitBy.bot && hitBy !== e) botHits++;
@@ -2833,11 +2836,15 @@
     e.useT = 0;
     e.hitAt = performance.now();
     if (hitBy && hitBy !== e && hitBy.local) { hitBy.hmAt = e.hitAt; hitBy.hmKill = e.hp <= 0; }
-    // shot down to half or worse: bleeding until a stim closes it up
-    if (e.hp > 0 && e.hp <= 50 && !isZombie(e) && hitBy && hitBy !== e && !e.down) {
+    // shot down to half or worse: bleeding until a stim closes it up.
+    // A sniper round always opens a wound, and a worse one: 2 HP a second, 30 HP.
+    var snipe = gun === 'rifle';
+    if (e.hp > 0 && (e.hp <= 50 || snipe) && !isZombie(e) && hitBy && hitBy !== e && !e.down) {
       if (!e.bleeding && e.local) feed('<b>BLEEDING</b> - use a stim', true);
+      if (!e.bleeding) { e.bleedRate = 1; e.bleedLeft = 0; }   // a fresh wound
       e.bleeding = true; e.bleedBy = fromId;
-      e.bleedLeft = 20;                         // a wound costs at most 20 HP
+      if (snipe) { e.bleedRate = Math.max(e.bleedRate || 1, SNIPER_BLEED.rate); e.bleedLeft = Math.max(e.bleedLeft || 0, SNIPER_BLEED.total); }
+      else if (!(e.bleedLeft > 20)) e.bleedLeft = 20;   // a wound costs at most 20 HP
     }
     if (e.bot) { e.flinch = 0.35; if (e.aimOff !== undefined) e.aimOff += rr(-0.06, 0.06); }
     bleed(e.x, e.y, ang, amount, false, bloodOf(e));
@@ -3952,7 +3959,7 @@
           var dx = e.x - b.x, dy = e.y - b.y;
           if (dx * dx + dy * dy < (e.r + 3) * (e.r + 3)) {
             if (onHere(ents[b.owner])) hits++;
-            damage(e, b.dmg, b.owner, Math.atan2(b.vy, b.vx));
+            damage(e, b.dmg, b.owner, Math.atan2(b.vy, b.vx), b.gun);
             dead = true; break;
           }
         }
@@ -4127,9 +4134,9 @@
       var bl = ents[i];
       if (!bl.alive || !bl.bleeding || bl.down || bl.air) continue;
       if (godMode && bl === player) continue;
-      var bd = Math.min(1 * dt, bl.bleedLeft || 0);    // 1 HP a second
+      var bd = Math.min((bl.bleedRate || 1) * dt, bl.bleedLeft || 0);    // 1 HP a second; a sniper wound, 2
       bl.hp -= bd; bl.bleedLeft = (bl.bleedLeft || 0) - bd;
-      if (bl.bleedLeft <= 0 && bl.hp > 0) { bl.bleeding = false; continue; }
+      if (bl.bleedLeft <= 0 && bl.hp > 0) { bl.bleeding = false; bl.bleedRate = 1; continue; }
       if (bl.hp <= 0) { bl.hp = 0; bl.bleeding = false; hitCause = 'bleed'; kill(bl, ents[bl.bleedBy] && ents[bl.bleedBy] !== bl ? bl.bleedBy : -1); hitCause = 'gun'; }
     }
     pingTick(dt);
