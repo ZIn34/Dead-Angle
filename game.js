@@ -2032,11 +2032,22 @@
       e.landX = clamp(e.x - plane.dy * side + plane.dx * ahead, TILE * 3, WORLD_W - TILE * 3);
       e.landY = clamp(e.y + plane.dx * side + plane.dy * ahead, TILE * 3, WORLD_H - TILE * 3);
       if (zone) {
+        // In battle royale the bots fan out over the whole circle rather than
+        // all landing along the one stretch of flight path - spread out, the
+        // first fights come one at a time instead of all at once.
+        if (mode === 'br') {
+          var la = Math.random() * Math.PI * 2, lr = Math.sqrt(Math.random()) * zone.r * 0.8;
+          e.landX = clamp(zone.cx + Math.cos(la) * lr, TILE * 3, WORLD_W - TILE * 3);
+          e.landY = clamp(zone.cy + Math.sin(la) * lr, TILE * 3, WORLD_H - TILE * 3);
+        }
         // pull the spot inside the circle (with room to spare)
         var lzx = e.landX - zone.cx, lzy = e.landY - zone.cy, lzd = Math.sqrt(lzx * lzx + lzy * lzy) || 1;
         var safeR = zone.r * 0.8;
         if (lzd > safeR) { e.landX = zone.cx + lzx / lzd * safeR; e.landY = zone.cy + lzy / lzd * safeR; }
       }
+      // a far spot takes a longer glide
+      var gd = Math.sqrt((e.landX - e.x) * (e.landX - e.x) + (e.landY - e.y) * (e.landY - e.y));
+      e.chuteT = clamp(gd / GLIDE_SPEED + 0.4, CHUTE_TIME, 16);
     }
     if (e.local) audioEmit(e.x, e.y, PICK_SND, e.id);
     // a partner bot bails out right behind you
@@ -2097,7 +2108,7 @@
             e.ang = Math.atan2(gy, gx);
           }
         }
-        if (e.airT >= CHUTE_TIME) land(e);
+        if (e.airT >= (e.bot && e.chuteT ? e.chuteT : CHUTE_TIME)) land(e);
       }
     }
     plane.riders = riders;
@@ -3227,9 +3238,12 @@
         if (mode === 'br' && o !== e.target) {
           if ((e.skip[o.id] || 0) > matchTime) continue;          // already let them go
           if (e.skip[o.id] === undefined || e.skip[o.id] <= matchTime) {
-            // early on most people avoid a fight; later it is kill or be killed
-            var takeIt = Math.random() < (matchTime < 75 ? 0.3 : 0.62);
-            if (!takeIt) { e.skip[o.id] = matchTime + rr(4, 8); continue; }
+            // early on most people avoid a fight; later it is kill or be killed.
+            // Through the whole first circle, bots mostly leave other bots be
+            // (a person is still fair game, so you get your fights).
+            var calm = zone && zone.phase === 0 && !o.local;
+            var takeIt = Math.random() < (calm ? 0.1 : (matchTime < 75 ? 0.3 : 0.62));
+            if (!takeIt) { e.skip[o.id] = matchTime + (calm ? rr(10, 18) : rr(4, 8)); continue; }
             e.skip[o.id] = -1;                                    // decided: fight
           }
         }
@@ -3985,7 +3999,9 @@
           s.heard[e.id] = 1;
           // In battle royale, a distant firefight is usually someone else's
           // problem - most bots keep looting instead of all piling in.
-          var shrug = mode === 'br' && s.kind === 'shot' && d > 450 && Math.random() < 0.68;
+          // Early on (the first circle) nearly all of them do: loot first, fight later.
+          var early = mode === 'br' && zone && zone.phase === 0;
+          var shrug = mode === 'br' && s.kind === 'shot' && d > (early ? 260 : 450) && Math.random() < (early ? 0.95 : 0.68);
           if (!e.target && !shrug) {
             // sharper ears place the noise more precisely
             var err = 60 * (1.6 - ear);
