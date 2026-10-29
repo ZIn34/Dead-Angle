@@ -1363,7 +1363,7 @@
   // host side: everyone connected to us. { conn, name, skin, uid, party, in, ent, sigs }
   var netGuests = [], netPublic = false, netCode = '';
   var acctName = '';                 // the signed-in username, if any
-  var NET_MAX = 8;                   // people in one match, host included
+  var NET_MAX = 48;                  // people in one match, host included (a full battle royale)
   // on this machine (not merely human - remote guests are local to the host's sim)
   function onHere(e) { return !!(e && e.local && !(e.ctl && e.ctl.net)); }
   var netGuestSkin = 0, netHostHeld = false;
