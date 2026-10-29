@@ -188,7 +188,6 @@ h1 .gold{color:var(--gold)}
 .modesum{font-family:var(--font-m);font-size:11px;letter-spacing:.26em;color:var(--khaki);text-transform:uppercase}
 .mbtns{display:flex;flex-wrap:wrap;justify-content:center;gap:12px 10px;max-width:640px}
 .mbtns .go.ghost{font-size:11.5px;padding:9px 18px}
-#optBtn[aria-expanded="true"]{background:var(--gold);color:var(--out)}
 .opts{display:flex;flex-direction:column;align-items:center;gap:22px;width:100%}
 .opts[hidden]{display:none}
 @media (max-height:560px){
@@ -299,7 +298,6 @@ h1 .gold{color:var(--gold)}
       </div>
       <p class="onlinehint">QUICK PLAY waits for whoever turns up, then starts &#183; HOST A ROOM gives you a code to read out &#183; JOIN A ROOM takes someone else's code</p>
       <div class="mbtns">
-        <button class="go ghost" id="optBtn" type="button" aria-expanded="false">MATCH OPTIONS</button>
         <button class="go ghost" id="quickBtn" type="button">QUICK PLAY</button>
         <button class="go ghost" id="onlineBtn" type="button">HOST A ROOM</button>
         <button class="go ghost" id="joinBtn" type="button">JOIN A ROOM</button>
@@ -309,7 +307,7 @@ h1 .gold{color:var(--gold)}
         <button class="go ghost" id="tutBtn" type="button">TUTORIAL</button>
       </div>
 
-      <div class="opts" id="opts" hidden>
+      <div class="opts" id="opts">
       <div class="picks">
         <div class="pick">
           <p>MODE</p>
@@ -322,6 +320,7 @@ h1 .gold{color:var(--gold)}
             <button type="button" data-m="zomb" aria-pressed="false">INFECTION</button>
             <button type="button" data-m="duel" aria-pressed="false">1V1</button>
             <button type="button" data-m="gun" aria-pressed="false">GUN GAME</button>
+            <button type="button" data-m="tour">1V1 TOURNEY</button>
           </div>
         </div>
         <div class="pick" id="mapPick">
@@ -408,6 +407,7 @@ h1 .gold{color:var(--gold)}
       <div class="pbtns">
         <button class="go" id="netHost" type="button">HOST A ROOM</button>
         <button class="go ghost" id="cgInviteBtn" type="button" hidden>COPY INVITE LINK</button>
+        <button class="go ghost" id="linkBtn" type="button" hidden>COPY INVITE LINK</button>
         <div class="netcode" id="netCodeBox" hidden>ROOM CODE<b id="netCode">-----</b></div>
         <div class="plist" id="partyList" hidden></div>
         <div class="pchat" id="partyChat" hidden>
@@ -429,6 +429,7 @@ h1 .gold{color:var(--gold)}
               <button type="button" data-m="zomb">INFECTION</button>
               <button type="button" data-m="duel">1V1</button>
               <button type="button" data-m="gun">GUN GAME</button>
+              <button type="button" data-m="tour">1V1 TOURNEY</button>
             </div>
           </div>
           <div class="pick" id="partyMapPick">

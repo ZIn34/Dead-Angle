@@ -75,6 +75,7 @@
     ctf:  { field: 14, zone: false, loot: false, respawn: true,  label: 'SCORE', target: 3, teams: true, ctf: true },
     sect: { field: 16, zone: false, loot: false, respawn: true,  label: 'SCORE', target: 150, teams: true, sectors: 3 },
     zomb: { field: 20, zone: false, loot: false, respawn: true,  label: 'ALIVE', teams: true, zombies: true, clock: 190 },
+    tour: { field: 16, zone: false, loot: false, respawn: false, label: 'LEFT', tourney: true },
     tut:  { field: 1,  zone: false, loot: false, respawn: false, label: 'TUTORIAL' }
   };
   var ZOMBIE_SKIN = 8;
@@ -89,6 +90,7 @@
   var MODE_TEXT = {
     br_cqb: 'Forty-eight drop into a dark warren of rooms and corridors. You land with empty hands \u2014 find a weapon before someone finds you, and stay inside the closing zone.',
     br_world: 'Forty-eight drop into open ground scattered with buildings. Long sightlines, nowhere to hide in the open, and the loot is inside the structures.',
+    tour: 'Everyone is paired off into their own walled pit and fights their one opponent at the same time as everyone else. Win and you are paired with another winner, round after round, until one is left. Lose and you watch the rest of it play out.',
     duel: 'One opponent, identical loadouts, on a small arena. First to five rounds. No looting \u2014 just you, them, and who moves quieter.',
     gun: 'Every elimination hands you the next weapon up the ladder: pistol, shotgun, sniper, rifle. Get a kill with the rifle to win. Everyone respawns.',
     zomb: 'A few turn at the start and more keep coming, faster as the clock runs down. The infected carry nothing and cannot shoot - they are faster than you, they find you without needing to see you, and a hit puts you on their side. Survive the clock and the living win; lose the last human and it is over.',
@@ -499,6 +501,44 @@
       if (Math.random() < 0.25) setT(cxx, cyy + 1, 1);
     }
     curMat = 1;
+    finishMap();
+  }
+
+  // One walled pit per pair, laid out in a grid with no way between them.
+  // Everybody fights at the same time without anyone else wandering in.
+  var PIT = 22, pits = [];
+  function genPits(pairCount) {
+    var cols = Math.max(1, Math.ceil(Math.sqrt(pairCount)));
+    var rows = Math.max(1, Math.ceil(pairCount / cols));
+    MAP_W = cols * PIT + 2; MAP_H = rows * PIT + 2;
+    grid.fill(1);
+    mat.fill(0); curMat = 1;
+    insideTiles.length = 0;
+    pits = [];
+    for (var p = 0; p < pairCount; p++) {
+      var ox = 1 + (p % cols) * PIT, oy = 1 + Math.floor(p / cols) * PIT;
+      // the floor of this pit, two tiles in from its walls
+      for (var y = oy + 2; y < oy + PIT - 2; y++) {
+        for (var x = ox + 2; x < ox + PIT - 2; x++) carve(x, y);
+      }
+      // a little cover so it is not a bare box
+      var blocks = 3 + rnd(3);
+      for (var b = 0; b < blocks; b++) {
+        var bw = 2 + rnd(4), bh = 2 + rnd(4);
+        var bx = ox + 4 + rnd(Math.max(1, PIT - bw - 8)), by = oy + 4 + rnd(Math.max(1, PIT - bh - 8));
+        for (var yy = by; yy < by + bh; yy++) for (var xx = bx; xx < bx + bw; xx++) setT(xx, yy, 1);
+      }
+      // a clear cross through the middle, so cover can never seal one of them
+      // into a corner, and clear ground around both starts
+      var midY = oy + Math.floor(PIT / 2), midX = ox + Math.floor(PIT / 2);
+      for (var cxx = ox + 2; cxx < ox + PIT - 2; cxx++) { carve(cxx, midY); carve(cxx, midY - 1); }
+      for (var cyy = oy + 2; cyy < oy + PIT - 2; cyy++) { carve(midX, cyy); carve(midX - 1, cyy); }
+      var spots = [{ x: ox + 4, y: midY }, { x: ox + PIT - 5, y: midY }];
+      for (var si = 0; si < spots.length; si++) {
+        for (var sy = -1; sy <= 1; sy++) for (var sx = -1; sx <= 1; sx++) carve(spots[si].x + sx, spots[si].y + sy);
+      }
+      pits.push({ a: spots[0], b: spots[1], cx: ox + PIT / 2, cy: oy + PIT / 2 });
+    }
     finishMap();
   }
 
@@ -1460,7 +1500,107 @@
     };
   }
   function curSlot(e) { return e.slots[e.slot]; }
-  function foes(a, b) { return a.team !== b.team; }
+  // In a tourney your only enemy is the one in your pit.
+  function foes(a, b) {
+    if (MODE.tourney) return a.pit === b.pit && a.team !== b.team;
+    return a.team !== b.team;
+  }
+  var tour = { round: 0, left: [], waiting: false, champion: null, clock: 0 };
+  var tourLeft = 0;                  // how many are still in, as told by the host
+  var tourIdle = false;              // and whether your own fight is settled
+  var TOUR_ROUND_SECS = 75;
+  function tourNames(list) {
+    return list.map(function (e) { return e.name; });
+  }
+  // Pair up whoever is left and drop each pair into their own pit.
+  function tourSeed(list) {
+    shuffle(list);
+    tour.round++;
+    tour.waiting = false;
+    tour.clock = TOUR_ROUND_SECS;
+    var pairCount = Math.ceil(list.length / 2);
+    if (pits.length < pairCount) genPits(pairCount);
+    var i;
+    for (i = 0; i < ents.length; i++) { ents[i].pit = -1; ents[i].tourOut = ents[i].tourOut || false; }
+    for (i = 0; i < list.length; i += 2) {
+      var pit = pits[i >> 1], one = list[i], two = list[i + 1];
+      one.pit = i >> 1; one.team = 0;
+      placeEnt(one, pit.a);
+      reviveForTour(one);
+      if (two) {
+        two.pit = i >> 1; two.team = 1;
+        placeEnt(two, pit.b);
+        reviveForTour(two);
+      } else {
+        // odd one out: through to the next round without a fight
+        one.tourBye = true;
+        feed('<b>' + one.name + '</b> gets a bye', one.local);
+      }
+    }
+    tour.left = list.slice();
+    alive = list.length;
+    var mine = locals[0] && locals[0].pit >= 0 ? ents.filter(function (e) {
+      return e.pit === locals[0].pit && e !== locals[0] && !e.tourOut;
+    })[0] : null;
+    feed('<b>ROUND ' + tour.round + '</b> - ' + list.length + ' left' + (mine ? ' - you face <b>' + mine.name + '</b>' : ''), true);
+  }
+  function reviveForTour(e) {
+    e.alive = true; e.down = false; e.hp = 100; e.respawnT = 0; e.bleeding = false;
+    e.kc = null; e.spec = null; e.pendEnd = null;
+    giveLoadout(e);
+  }
+  // A pit is settled when one of the two is out. When every pit is settled,
+  // the winners go again.
+  function tourTick(dt) {
+    if (!MODE.tourney || state !== 'play' || !tour.left.length) return;
+    // a pair who cannot finish each other off does not get to hold everyone
+    // else up: when the round clock runs out, the healthier one goes through
+    tour.clock -= dt || 0;
+    alive = tour.left.filter(function (e) { return e.alive || e.tourBye; }).length;
+    if (tour.clock <= 0) {
+      tour.clock = 20;
+      for (var sp2 = 0; sp2 < pits.length; sp2++) {
+        var still = tour.left.filter(function (e) { return e.pit === sp2 && e.alive; });
+        if (still.length < 2) continue;
+        still.sort(function (x, y) { return y.hp - x.hp; });
+        var loser = still[still.length - 1];
+        feed('<b>' + still[0].name + '</b> wins on health', still[0].local || loser.local);
+        loser.hp = 0;
+        kill(loser, still[0].id);
+      }
+    }
+    // Two people sealed in a room together know roughly where the other is:
+    // without this the bots wander their pit until they bump into each other.
+    for (var hi = 0; hi < tour.left.length; hi++) {
+      var hb = tour.left[hi];
+      if (!hb.bot || !hb.alive || hb.target) continue;
+      for (var hj = 0; hj < tour.left.length; hj++) {
+        var rival = tour.left[hj];
+        if (rival === hb || rival.pit !== hb.pit || !rival.alive) continue;
+        hb.alertX = rival.x; hb.alertY = rival.y; hb.alertT = 3;
+        break;
+      }
+    }
+    var standing = tour.left.filter(function (e) { return e.alive || e.tourBye; });
+    var busy = false;
+    for (var p = 0; p < pits.length; p++) {
+      var inPit = tour.left.filter(function (e) { return e.pit === p && (e.alive || e.tourBye); });
+      var started = tour.left.filter(function (e) { return e.pit === p; });
+      if (started.length === 2 && inPit.length === 2) { busy = true; break; }
+    }
+    if (busy) return;                       // somebody is still fighting
+    if (standing.length <= 1) {
+      tour.champion = standing[0] || null;
+      var mineWon = !!(tour.champion && tour.champion.local);
+      finish(mineWon, tour.champion
+        ? (mineWon ? 'You took the whole thing.' : tour.champion.name + ' took the whole thing.')
+        : 'Nobody left standing.', 1);
+      tour.left = [];
+      return;
+    }
+    standing.forEach(function (e) { e.tourBye = false; });
+    tourSeed(standing);
+  }
   function isZombie(e) { return !!(MODE.zombies && e.team === 1); }
   // Which of the two carried guns suits this range: shotguns fall off hard,
   // snipers are clumsy in a corridor, an empty magazine is worth little.
@@ -1718,7 +1858,8 @@
       duel: 52, gun: 96, team: 118, war: 156, ctf: 126, sect: 122, zomb: 112, br: 224
     };
     var span = FOOTPRINT[mode] || 118;
-    if (mapKind === 'world' && mode !== 'tut') genWorld(span);
+    if (MODES[mode].tourney) genPits(Math.ceil(MODES[mode].field / 2));
+    else if (mapKind === 'world' && mode !== 'tut') genWorld(span);
     else if (mode === 'duel' || mode === 'tut') genArena();
     // the divisor sets how packed the rooms are, and it moves every match, so
     // one map comes out warren-tight and the next has more air in it
@@ -1808,6 +1949,11 @@
 
     charCache = {};
     ents.forEach(function (e, i) { placeEnt(e, sp[i % sp.length]); });
+    if (MODE.tourney) {
+      tour = { round: 0, left: [], waiting: false, champion: null };
+      ents.forEach(function (e) { e.tourOut = false; e.tourBye = false; e.pit = -1; });
+      tourSeed(ents.slice());
+    }
 
     if (MODE.ctf) {
       var acc = [{ x: 0, y: 0, n: 0 }, { x: 0, y: 0, n: 0 }];
@@ -2812,6 +2958,12 @@
       e.respawnT = 2.2;
       return;
     }
+    if (MODE.tourney) {
+      e.tourOut = true;
+      var winner = ents.filter(function (o) { return o.pit === e.pit && o !== e && o.alive; })[0];
+      if (winner) feed('<b>' + winner.name + '</b> beat <b>' + e.name + '</b>', winner.local || e.local);
+      return;
+    }
     if (mode === 'duel') {
       for (var dq = 0; dq < ents.length; dq++) {
         if (ents[dq] !== e && ents[dq].alive && ents[dq].team === e.team) return;   // their partner fights on
@@ -2934,7 +3086,11 @@
       if (gg.ent) netSendOver(gg, wonFor(gg.ent, hostSide), msg, gg.ent.alive ? 1 : (gg.ent.place || place));
     }
     var big, small;
-    if (mode === 'br') { big = '#' + place; small = 'OF ' + fieldN; }
+    if (MODE.tourney) {
+      big = won ? 'CHAMPION' : 'OUT';
+      small = 'ROUND ' + Math.max(1, tour.round);
+    }
+    else if (mode === 'br') { big = '#' + place; small = 'OF ' + fieldN; }
     else if (mode === 'duel') { big = won ? 'WIN' : 'LOSS'; small = score[player.team] + ' \u2014 ' + score[1 - player.team]; }
     else if (MODE.teams) {
       big = won ? 'WIN' : 'LOSS';
@@ -3978,6 +4134,7 @@
     }
     pingTick(dt);
     sightTick(dt);
+    tourTick(dt);
     specTick();
     specEndCheck();
     if (mode === 'tut') tutTick(dt);
@@ -4091,7 +4248,12 @@
     if (sbx) sbx.className = 'meds' + (player.smokes ? '' : ' none');
 
     elAliveL.textContent = MODE.label;
-    if (mode === 'br') {
+    if (MODE.tourney) {
+      var tn = netGuest ? tourLeft : tour.left.filter(function (e) { return e.alive || e.tourBye; }).length;
+      elAlive.textContent = ('0' + tn).slice(-2);
+      elZone.className = 'zone-line';
+      elZone.textContent = 'ROUND ' + Math.max(1, tour.round) + ' \u00b7 LAST ONE STANDING TAKES IT';
+    } else if (mode === 'br') {
       elAlive.textContent = ('0' + alive).slice(-2);
       if (zone.closing) { elZone.textContent = 'ZONE CLOSING \u00b7 ' + fmtTime(zone.timer); elZone.className = 'zone-line hot'; }
       else { elZone.textContent = 'ZONE HOLDS \u00b7 ' + fmtTime(zone.timer); elZone.className = 'zone-line'; }
@@ -4594,7 +4756,9 @@
         minEnemyDist: Math.round(minEnemy), bullets: bullets.length,
         sounds: sounds.length, shotsByPlayer: shots,
         loot: loot.length, lootFirst: loot[0] || null, decals: decals.length, corpses: corpses.length,
-        sight: DIFF[difficulty].sight, mapW: MAP_W
+        sight: DIFF[difficulty].sight, mapW: MAP_W,
+        tour: MODE.tourney ? { round: tour.round, left: tour.left.filter(function (e) { return e.alive || e.tourBye; }).length,
+                               pits: pits.length, mine: player.pit } : null
       };
     }
   };
@@ -5149,6 +5313,7 @@
 
     ctx.setTransform(dpr, 0, 0, dpr, dpr * VX, dpr * VY);
     renderTutorial();
+    renderTourney();
     renderDropHint();
     renderHostHold();
     renderAllies();
@@ -5413,6 +5578,7 @@
   }
   function renderAllies() {
     if (noOverlay || !player.alive) return;
+    if (MODE.tourney) return;                 // everyone here is an opponent or none of your business
     var mates = [];
     for (var i = 0; i < ents.length; i++) {
       var a = ents[i];
@@ -5763,6 +5929,40 @@
     ctx.restore();
   }
 
+  // Between fights: who is left, and who you are waiting on.
+  function renderTourney() {
+    if (noOverlay || !MODE.tourney || state !== 'play') return;
+    var me = player;
+    if (!me) return;
+    var fightOver;
+    if (netGuest) fightOver = !!tourIdle;
+    else fightOver = me.tourOut || me.tourBye ||
+      !ents.some(function (o) { return o !== me && o.pit === me.pit && o.alive; });
+    if (!fightOver) return;
+    var standing = tour.left.filter(function (e) { return e.alive || e.tourBye; });
+    var leftN = netGuest ? tourLeft : standing.length;
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var y0 = ch * 0.16;
+    ctx.font = '400 15px "Russo One", "Chakra Petch", sans-serif';
+    ctx.fillStyle = '#f2bd1d';
+    ctx.fillText('ROUND ' + tour.round, cw / 2, y0);
+    ctx.font = '400 34px "Russo One", "Chakra Petch", sans-serif';
+    ctx.fillStyle = '#f1e7d0';
+    ctx.fillText(leftN + ' LEFT', cw / 2, y0 + 32);
+    ctx.font = '500 11px "IBM Plex Mono", monospace';
+    ctx.fillStyle = 'rgba(241,231,208,.75)';
+    ctx.fillText(!me.alive ? 'YOU ARE OUT - WATCHING THE REST'
+               : 'YOUR FIGHT IS WON - WAITING FOR THE REST', cw / 2, y0 + 60);
+    var names = tourNames(standing).slice(0, 8).join('   ');
+    if (names) {
+      ctx.font = '600 10px "IBM Plex Mono", monospace';
+      ctx.fillStyle = 'rgba(146,170,196,.9)';
+      ctx.fillText(names, cw / 2, y0 + 80);
+    }
+    ctx.restore();
+  }
+
   function renderDropHint() {
     renderFlagHint();
     if (!player.alive || !player.air) return;
@@ -6042,7 +6242,7 @@
     }
     for (var i = 0; i < ents.length; i++) {
       var a = ents[i];
-      if (!a.alive || a === player || a.team !== player.team) continue;
+      if (!a.alive || a === player || a.team !== player.team || MODE.tourney) continue;
       ctx.fillStyle = '#7ce7d8';
       ctx.beginPath(); ctx.arc(mx(a.x), my(a.y), 2.4, 0, 6.2832); ctx.fill();
     }
@@ -6543,7 +6743,7 @@
     if (state === 'play' && !netRole) pause();      // a friend online keeps playing
   });
 
-  var MODE_LABEL = { tut: 'Tutorial', br: 'Battle royale', duel: '1v1', gun: 'Gun game', team: 'Teams 5v5', war: 'War 10v10', ctf: 'Capture the flag', sect: 'Sector capture', zomb: 'Infection' };
+  var MODE_LABEL = { tut: 'Tutorial', br: 'Battle royale', duel: '1v1', gun: 'Gun game', team: 'Teams 5v5', war: 'War 10v10', ctf: 'Capture the flag', sect: 'Sector capture', zomb: 'Infection', tour: '1v1 tourney' };
   function pause() {
     cgGame('gameplayStop');
     if (netGuest) {                                   // the host's match keeps going
@@ -6612,12 +6812,6 @@
     $('startBtn').textContent = 'PLAY';
   }
   // the match options fold away so PLAY is the first thing on the menu
-  $('optBtn').addEventListener('click', function () {
-    var box = $('opts'), open = box.hidden;
-    box.hidden = !open;
-    this.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
   $('optPlay').addEventListener('click', function () { $('startBtn').click(); });
   $('squadRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
@@ -7222,6 +7416,10 @@
         var edx = q[1] - eye.x, edy = q[2] - eye.y;
         if (edx * edx + edy * edy <= reach * reach) x.ev.push(q);
       }
+      if (MODE.tourney) {
+        var gIdle = !ents.some(function (o) { return o !== g.ent && o.pit === g.ent.pit && o.alive; });
+        x.tr = [tour.round, tour.left.filter(function (e) { return e.alive || e.tourBye; }).length, gIdle ? 1 : 0];
+      }
       x.pg = pings.filter(function (q) { return q.team === g.ent.team; });
       x.f = flashes.filter(function (q) { return nearGuest(g, q.x, q.y); }).map(function (q) {
         return { x: Math.round(q.x), y: Math.round(q.y), ang: r2(q.ang), t: r2(q.t), max: r2(q.max), tint: q.tint, scale: r2(q.scale) };
@@ -7524,6 +7722,7 @@
     if (player) kills = player.kills || 0;
     dmgMarks = m.dm || [];
     pings = m.pg || [];
+    if (m.tr) { tour.round = m.tr[0]; tourLeft = m.tr[1]; tourIdle = !!m.tr[2]; }
     if (m.lo) loot = m.lo.map(unpackLoot);
     if (m.dc) decals = m.dc.map(unpackMark);
     if (m.de) deaths = m.de.map(unpackMark);
@@ -7704,9 +7903,9 @@
     showIf('netCodeBox', netView === 'host' && hosting && !!netCode);
     showIf('joinLabel', netView === 'join' && !joined);
     showIf('joinRow', netView === 'join' && !joined);
-    showIf('netLeave', !!netRole);
+    showIf('netLeave', !!netRole && !quick);     // BACK is the way out of waiting
+    showIf('linkBtn', !CG_MODE && netView === 'host' && hosting && !!netCode);
     showIf('netStatus', !quick);
-    $('netLeave').textContent = quick ? 'STOP LOOKING' : 'LEAVE ROOM';
   }
   function openOnline(view) {
     if (view) netView = view;
@@ -7730,7 +7929,8 @@
     if (ev.key === 'Enter') joinGame(this.value);
   });
   $('netBack').addEventListener('click', function () {
-    quickStand(); $('online').hidden = true; elMenu.hidden = false; syncMenu(); });
+    quickStand();
+    if (netView === 'quick' && netRole) netClose(''); $('online').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('netLeave').addEventListener('click', function () { netClose('Disconnected.'); });
 
   // ---------------------------------------------------------------- crazygames
@@ -8018,6 +8218,24 @@
     if (ev.key === 'Enter') takeName();
   });
   $('nameLogin').addEventListener('click', function () { $('namegate').hidden = true; openAccount(''); });
+
+  // Anyone can invite without an account: the room's own address.
+  function roomLink() {
+    return location.origin + location.pathname + '?room=' + netCode;
+  }
+  function copyRoomLink() {
+    if (!netCode) return;
+    var link = roomLink();
+    var done = function () { netStatus('Link copied - send it to whoever you want in.'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, function () { netStatus(link); });
+    else netStatus(link);
+  }
+  if ($('linkBtn')) $('linkBtn').addEventListener('click', copyRoomLink);
+  // and opening that link drops you straight into their room
+  function roomFromUrl() {
+    var m = /[?&]room=([A-Za-z0-9]{3,8})/.exec(location.search || '');
+    return m ? m[1].toUpperCase() : '';
+  }
 
   function openAccount(msg) {
     ['menu', 'online', 'friends'].forEach(function (id) { $(id).hidden = true; });
@@ -8387,7 +8605,11 @@
     ev.stopPropagation();
     if (ev.key === 'Enter') sendChat();
   });
-  $('friendsBtn').addEventListener('click', openFriends);
+  $('friendsBtn').addEventListener('click', function () {
+    // a guest has no friends list to show, so send them where it is made
+    if (isGuest()) { openAccount('Friends need an account. It takes a moment, and your name and credits come with you.'); return; }
+    openFriends();
+  });
   $('friendsBack').addEventListener('click', function () { $('friends').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('friendsNeed').addEventListener('click', function () { openAccount(''); });
   $('inviteJoin').addEventListener('click', function () { answerInvite(true); });
@@ -8439,5 +8661,18 @@
   renderAcct();                       // show the name we came in with
   cgInit();
   if (!CG_MODE && needName()) openNameGate('');
+  // someone sent you a room link: go there as soon as you have a name
+  (function () {
+    var want = roomFromUrl();
+    if (!want || CG_MODE) return;
+    var tryJoin = function () {
+      if (needName()) { setTimeout(tryJoin, 400); return; }
+      openOnline('join');
+      $('netJoinCode').value = want;
+      netStatus('Joining the room from your link...');
+      joinGame(want);
+    };
+    setTimeout(tryJoin, 300);
+  })();
   requestAnimationFrame(frame);
 })();
