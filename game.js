@@ -597,7 +597,7 @@
 
   // You see what is in front of you, plus a little circle right around you
   // (you would feel someone at your back). Bots get the same eyes.
-  var FOV_HALF = CG_MODE ? 1.28 : 0.96, NEAR_SEE = CG_MODE ? 120 : 60;
+  var FOV_HALF = 1.28, NEAR_SEE = 120;
   function inCone(e, x, y, half) {
     var dx = x - e.x, dy = y - e.y;
     if (dx * dx + dy * dy <= NEAR_SEE * NEAR_SEE) return true;
@@ -1259,9 +1259,6 @@
   var BASE_SKIN = 9;
   var WALLET = { coins: 0, owned: [BASE_SKIN], skin: BASE_SKIN };
   var CG_MODE = window.DEAD_ANGLE_PLATFORM === 'crazygames';
-  // CrazyGames is a PEGI 12 site with a lot of daylight games on it. Their
-  // build keeps the same fight but loses the blood and opens the view up.
-  var GORE = !CG_MODE;
   var CG = null;                          // the CrazyGames SDK, once it is ready
   function storeGet(k) {
     try {
@@ -1292,6 +1289,10 @@
   function skinPrice(i) { return i === BASE_SKIN ? 0 : (i >= 12 ? 500 : 200); }
 
   var SET = { vol: 66, music: 45, dead: 18, shake: true, minimap: true, blood: true };
+  // Blood is a setting and nothing else. CrazyGames is a PEGI 12 site, so
+  // their build starts with it off; anyone can turn it on in SETTINGS, and
+  // loadSettings below brings back whatever they chose last time.
+  if (CG_MODE) SET.blood = false;
   function loadSettings() {
     try {
       var raw = storeGet('earshot.settings');
@@ -1363,6 +1364,22 @@
   // host side: everyone connected to us. { conn, name, skin, uid, party, in, ent, sigs }
   var netGuests = [], netPublic = false, netCode = '';
   var acctName = '';                 // the signed-in username, if any
+  var guestName = '';                // the name you typed on the way in
+  var guestEarned = 0;               // credits earned since you last signed in
+  function playerName() { return acctName || guestName || 'PLAYER'; }
+  function guestTail() {
+    return (isGuest() && WALLET.coins) ? '  Playing as a guest - sign in before you leave to keep your credits.' : '';
+  }
+  function isGuest() { return !(fbUser && acctName); }
+  function needName() { return !acctName && !guestName; }
+  function loadName() { try { guestName = storeGet('earshot.name') || ''; } catch (err) {} }
+  function setGuestName(n) {
+    n = String(n || '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 16);
+    if (n.length < 2) return false;
+    guestName = n;
+    storeSet('earshot.name', n);
+    return true;
+  }
   var NET_MAX = 48;                  // people in one match, host included (a full battle royale)
   // on this machine (not merely human - remote guests are local to the host's sim)
   function onHere(e) { return !!(e && e.local && !(e.ctl && e.ctl.net)); }
@@ -1733,7 +1750,7 @@
     var online = netRole === 'host' && netGuests.length > 0 && mode !== 'tut';
     var sc = (online || mode === 'tut') ? null : (splitWant ? splitControls() : null);
     if (!online && splitWant && !sc) feed('split screen needs a <b>controller</b> for player 2', true);
-    if (netRole === 'host') player.name = acctName || 'HOST';
+    if (netRole === 'host') player.name = playerName();
     for (var gq = 0; gq < netGuests.length; gq++) netGuests[gq].ent = null;
     if (sc) {
       var p2 = makeEnt(sp[1 % sp.length], true, 'P2');
@@ -1981,9 +1998,6 @@
       g: { caps: ['E'] }, gp: { caps: ['X'] },
       start: function () { tutDrop('gun', 'silenced'); },
       done: function () { return hasGun(player, 'silenced'); } },
-    { title: 'RELOAD', k: 'Reload', p: 'Reload', g: { caps: ['R'] }, gp: { caps: ['A'] },
-      start: function () { var sl = curSlot(player); if (sl) sl.ammo = Math.min(sl.ammo, 4); },
-      done: function () { return player.reloadT > 0; } },
     { title: 'READY', k: 'That is the basics. Frags, smoke and stims are on the HUD; the menu lists every control. Your first match starts now.',
       p: 'That is the basics. Frags, smoke and stims are on the HUD; the menu lists every control. Your first match starts now.',
       g: { caps: ['ENTER'] }, gp: { caps: ['A'] },
@@ -2301,7 +2315,7 @@
   }
   function bloodOf(e) { return (e && isZombie(e)) ? 'zomb' : 'red'; }
   function addSplat(x, y, r, pal, kind) {
-    if (!SET.blood || !GORE) return;
+    if (!SET.blood) return;
     if (splats.length >= SPLAT_MAX) splats.shift();
     splats.push({ x: x, y: y, r: r, ang: Math.random() * 6.2832, v: rnd(6), pal: pal, t: 0,
                   grow: kind === 'pool' ? 2.4 : 0.12, kind: kind || 'drop' });
@@ -2309,7 +2323,7 @@
   // x, y: where; ang: the way the round was travelling; amount: how hard
   function bleed(x, y, ang, amount, big, pal) {
     if (netRole === 'host' && netHostLive()) netEv.push(['g', Math.round(x), Math.round(y), +(ang || 0).toFixed(2), Math.round(amount), big ? 1 : 0, pal || 'red']);
-    if (!SET.blood || !GORE) { spark(x, y, big ? 10 : 4, '196,204,214', 120); return; }
+    if (!SET.blood) { spark(x, y, big ? 10 : 4, '196,204,214', 120); return; }
     pal = pal || 'red';
     if (ang === undefined || ang === null || isNaN(ang)) ang = Math.random() * 6.2832;
     var n = Math.min(26, 4 + Math.round(amount / 5) + (big ? 12 : 0));
@@ -2672,7 +2686,7 @@
     if (e.bot) { e.flinch = 0.35; if (e.aimOff !== undefined) e.aimOff += rr(-0.06, 0.06); }
     bleed(e.x, e.y, ang, amount, false, bloodOf(e));
     e.lastHitAng = ang;
-    if (FX.blood && SET.blood && GORE && amount >= 30) {
+    if (FX.blood && SET.blood && amount >= 30) {
       if (decals.length > 90) decals.shift();
       decals.push({
         x: e.x + Math.cos(ang) * 5, y: e.y + Math.sin(ang) * 5,
@@ -2725,7 +2739,7 @@
     corpses.push({ x: e.x, y: e.y });
     bleed(e.x, e.y, e.lastHitAng, 60, true, bloodOf(e));
     audioEmit(e.x, e.y, DEATH_SND, -1);
-    if (FX.death && SET.blood && GORE) {
+    if (FX.death && SET.blood) {
       if (deaths.length > 60) deaths.shift();
       deaths.push({ x: e.x, y: e.y, ang: Math.random() * 6.2832, t: 0, scale: rr(0.95, 1.25) });
     }
@@ -2923,6 +2937,7 @@
     if (won) cgGame('happytime');
     var earned = kills * 12 + Math.round(matchTime / 6) + (won ? 80 : 0);
     WALLET.coins += earned;
+    if (isGuest()) guestEarned += earned;
     saveWallet();
     result = { big: big, small: small, won: won, earned: earned };
     overCause = msg + '  +' + earned + ' credits.';
@@ -2949,14 +2964,14 @@
         });
         $('vsRes').className = 'vsres ' + (cw >= ch ? 'side' : 'stack');
       }
-      $('overMsg').textContent = why;
+      $('overMsg').textContent = why + guestTail();
       $('stKills').textContent = k;
       $('stTime').textContent = fmtTime(t);
       $('stAcc').textContent = (sh ? Math.round(ht / sh * 100) : 0) + '%';
       elHud.hidden = true;
       elOver.hidden = false;
       if (netRole === 'host' && netPublic) {
-        $('overMsg').textContent = why + '  Next match in 10s.';
+        $('overMsg').textContent = why + '  Next match in 10s.' + guestTail();
         setTimeout(function () {
           if (tok === matchToken && state === 'over' && netRole === 'host' && netPublic) startMatch();
         }, 10000);
@@ -4991,7 +5006,7 @@
     var g = ctx.createRadialGradient(player.x, player.y, VR * 0.18, player.x, player.y, VR);
     g.addColorStop(0, 'rgba(4,6,10,0)');
     g.addColorStop(0.62, 'rgba(4,6,10,.28)');
-    g.addColorStop(1, CG_MODE ? 'rgba(4,6,10,.74)' : 'rgba(4,6,10,.93)');
+    g.addColorStop(1, 'rgba(4,6,10,.74)');
     ctx.fillStyle = g;
     ctx.fillRect(player.x - VR, player.y - VR, VR * 2, VR * 2);
 
@@ -5127,6 +5142,7 @@
     renderDropHint();
     renderHostHold();
     renderAllies();
+    renderOwnName();
     renderPings();
     renderObjectives();
     if (player.mapOpen && !noOverlay) drawBigMap();
@@ -5370,6 +5386,20 @@
     ctx.strokeRect(x - w / 2 + 0.5, y - 7.5, w - 1, 15);
     ctx.fillStyle = tint;
     ctx.fillText(txt, x, y + 0.5);
+  }
+  // Your name floats over you so you know who you are playing as. Enemies
+  // stay anonymous - a name would give away a player standing in the dark.
+  function renderOwnName() {
+    if (noOverlay || !player.alive || player.air === 'plane' || state !== 'play') return;
+    var nm = player.local ? playerName() : player.name;
+    if (!nm) return;
+    var sx = (player.x - cam.x) * zoom + cw / 2;
+    var sy = (player.y - cam.y) * zoom + ch / 2 - (player.r + 16) * zoom;
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 10px "IBM Plex Mono", monospace';
+    pill(nm, sx, sy, '#8ff0e4');
+    ctx.restore();
   }
   function renderAllies() {
     if (noOverlay || !player.alive) return;
@@ -6567,7 +6597,7 @@
     if (mode !== 'duel') sum.push(mapKind === 'world' ? 'World' : 'CQB');
     if (!MODES[mode].teams) sum.push(squad > 1 ? 'Duos' : 'Solo');
     if (blackout) sum.push('Blackout');
-    $('modeSum').textContent = sum.join(' · ');
+    $('modeSum').textContent = sum.join(' \u00b7 ');
     if (netRole === 'guest') { $('startBtn').textContent = 'WAITING FOR HOST'; return; }
     $('startBtn').textContent = 'PLAY';
   }
@@ -6653,6 +6683,9 @@
     var a = $('menuCoins'), b = $('coinsN');
     if (a) a.textContent = WALLET.coins;
     if (b) b.textContent = WALLET.coins;
+    // the moment a guest has something to lose, say so on the menu
+    var gh = $('guestHint');
+    if (gh) gh.hidden = !(isGuest() && WALLET.coins);
   }
 
   // The shop previews each skin by composing it exactly as the game would.
@@ -7183,7 +7216,7 @@
 
   // who is in the party, for everyone's screen
   function partyNames() {
-    var n = [acctName || 'HOST'];
+    var n = [playerName()];
     for (var i = 0; i < netGuests.length; i++) if (netGuests[i].party) n.push(netGuests[i].name);
     return n;
   }
@@ -7257,7 +7290,7 @@
   function sendPartyChat(text) {
     text = String(text || '').trim();
     if (!text || !netRole) return;
-    if (netRole === 'host') partySay(acctName || 'HOST', text);
+    if (netRole === 'host') partySay(playerName(), text);
     else netSend({ t: 'pchat', text: text.slice(0, 120) });
   }
   function cleanText(t) {
@@ -7298,7 +7331,7 @@
         conn.on('open', function () {
           opened = true;
           netRole = 'guest'; netCode = code;
-          netSend({ t: 'hi', skin: WALLET.skin, name: acctName || 'PLAYER', uid: acctUid(), pub: !!pub });
+          netSend({ t: 'hi', skin: WALLET.skin, name: playerName(), uid: acctUid(), pub: !!pub });
           netStatus(pub ? 'Joining a match...' : 'Connected! Waiting for the host to start a match.');
           syncMenu();
           cgRoom();
@@ -7380,7 +7413,7 @@
       $('placeN').textContent = m.big;
       $('placeN').className = m.won ? 'win' : '';
       $('placeL').textContent = m.small || '';
-      $('overMsg').textContent = m.msg + '  +' + earned + ' credits.';
+      $('overMsg').textContent = m.msg + '  +' + earned + ' credits.' + guestTail();
       $('stKills').textContent = m.kills || 0;
       $('stTime').textContent = fmtTime(m.time || 0);
       $('stAcc').textContent = '--';
@@ -7683,7 +7716,6 @@
     acctName = 'GUEST' + (1000 + rnd(9000));
     $('acctBtn').hidden = true;
     $('friendsBtn').hidden = true;
-    if ($('bloodRow')) $('bloodRow').hidden = true;
     $('acctName').textContent = acctName;
     var sdk = window.CrazyGames && window.CrazyGames.SDK;
     if (!sdk) { cgLand(); return; }                        // blocked (ad blocker): play on regardless
@@ -7849,7 +7881,9 @@
       if (typeof p.coins === 'number') {
         var owned = (p.owned || []).slice();
         WALLET.owned.forEach(function (k) { if (owned.indexOf(k) < 0) owned.push(k); });
-        WALLET = { coins: p.coins, owned: owned.length ? owned : WALLET.owned, skin: (p.skin | 0) };
+        // whatever this guest earned before signing in comes with them
+        WALLET = { coins: p.coins + guestEarned, owned: owned.length ? owned : WALLET.owned, skin: (p.skin | 0) };
+        guestEarned = 0;
         if (WALLET.owned.indexOf(WALLET.skin) < 0) WALLET.skin = WALLET.owned[0];
         try { localStorage.setItem('earshot.wallet', JSON.stringify(WALLET)); } catch (err) {}
         refreshCoins();
@@ -7880,18 +7914,45 @@
 
   function renderAcct() {
     var on = !!(fbUser && acctName);
-    $('acctName').textContent = on ? acctName : 'NOT LOGGED IN';
+    $('acctName').textContent = on ? acctName : (guestName ? guestName + '  \u00b7  GUEST' : 'NOT LOGGED IN');
     $('acctBtn').textContent = on ? 'LOG OUT' : 'LOG IN';
+    var gh = $('guestHint');
+    if (gh) gh.hidden = on || !WALLET.coins;
     $('friendsBox').hidden = !on;
     $('friendsNeed').hidden = on;
   }
+  // One box, one button. Nothing stands between a new player and a match.
+  function openNameGate(msg) {
+    ['menu', 'online', 'friends', 'account', 'shop', 'settings'].forEach(function (id) { if ($(id)) $(id).hidden = true; });
+    $('namegate').hidden = false;
+    $('nameStatus').textContent = msg || '';
+    $('guestUser').value = guestName || '';
+    setTimeout(function () { try { $('guestUser').focus(); } catch (err) {} }, 30);
+  }
+  function closeNameGate() { $('namegate').hidden = true; elMenu.hidden = false; syncMenu(); renderAcct(); }
+  function takeName() {
+    if (!setGuestName($('guestUser').value)) { $('nameStatus').textContent = 'Two letters or more, letters and numbers.'; return false; }
+    closeNameGate();
+    return true;
+  }
+  $('namePlay').addEventListener('click', takeName);
+  $('guestUser').addEventListener('keydown', function (ev) {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') takeName();
+  });
+  $('nameLogin').addEventListener('click', function () { $('namegate').hidden = true; openAccount(''); });
+
   function openAccount(msg) {
     ['menu', 'online', 'friends'].forEach(function (id) { $(id).hidden = true; });
     $('account').hidden = false;
     acctStatus(msg || '');
     loadFirebase(function () {});
   }
-  function closeAccount() { $('account').hidden = true; elMenu.hidden = false; syncMenu(); }
+  function closeAccount() {
+    $('account').hidden = true;
+    if (needName()) { openNameGate(''); return; }      // still nameless: back to the name
+    elMenu.hidden = false; syncMenu();
+  }
 
   // ---- friends ----
   function addFriend() {
@@ -8142,7 +8203,8 @@
     }, 400);
   }
   function quickPlay() {
-    if (CG_MODE && !fbUser) {
+    if (needName()) { openNameGate('Pick a name to play online.'); return; }
+    if (!fbUser) {
       openOnline();
       quickStatus('Connecting...');
       loadFirebase(function () {
@@ -8152,7 +8214,6 @@
       });
       return;
     }
-    if (!CG_MODE && (!fbUser || !acctName)) { openAccount('Log in to play online.'); return; }
     if (netRole === 'guest') { openOnline(); netStatus('You are in a party - the leader starts the match.'); return; }
     initAudio();
     if (netRole === 'host' && netGuests.length) { goPublicHost(); return; }
@@ -8276,13 +8337,24 @@
     requestAnimationFrame(frame);
   }
 
+  // a guest closing the tab would lose what they earned: say so first
+  window.addEventListener('beforeunload', function (ev) {
+    if (CG_MODE || !isGuest() || !WALLET.coins) return;
+    ev.preventDefault();
+    ev.returnValue = '';
+    return '';
+  });
+
   resize();
   buildTextures();
+  loadName();
   loadWallet();
   loadSettings();
   refreshCoins();
   syncMenu();
   syncTutBtn();
+  renderAcct();                       // show the name we came in with
   cgInit();
+  if (!CG_MODE && needName()) openNameGate('');
   requestAnimationFrame(frame);
 })();

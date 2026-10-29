@@ -280,6 +280,7 @@ h1 .gold{color:var(--gold)}
   <div class="screen" id="menu">
     <div class="panel">
       <div class="acct"><span id="acctName">NOT LOGGED IN</span><button class="tgl" id="acctBtn" type="button">LOG IN</button></div>
+      <p class="modedesc" id="guestHint" hidden>Sign in before you leave to keep your credits.</p>
       <div class="brand">
         <h1>DEAD <span class="gold">ANGLE</span></h1>
         <div class="rule"></div>
@@ -489,6 +490,25 @@ h1 .gold{color:var(--gold)}
       </div>
       <p class="modedesc" id="chatStatus"></p>
       <button class="go ghost" id="chatBack" type="button">BACK</button>
+    </div>
+  </div>
+
+  <div class="screen" id="namegate" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h1>DEAD <span class="gold">ANGLE</span></h1>
+        <div class="rule"></div>
+        <div class="tag">pick a name to play under</div>
+      </div>
+      <div class="acctform">
+        <input class="wide" id="guestUser" maxlength="16" placeholder="USERNAME" spellcheck="false" aria-label="Username">
+      </div>
+      <p class="modedesc" id="nameStatus"></p>
+      <div class="pbtns">
+        <button class="go" id="namePlay" type="button">PLAY</button>
+        <button class="go ghost" id="nameLogin" type="button">I HAVE AN ACCOUNT</button>
+      </div>
+      <p class="modedesc">No account needed. Credits you earn as a guest are only kept if you sign in before you leave.</p>
     </div>
   </div>
 
