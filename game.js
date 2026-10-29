@@ -386,6 +386,9 @@
     var rooms = [], i;
     for (i = 0; i < 500 && rooms.length < count; i++) {
       var rw = rmin + rnd(rmax - rmin), rh = rmin + rnd(rmax - rmin);
+      // one room in eight opens out into a hall, so a map has somewhere to
+      // fight as well as somewhere to creep
+      if (Math.random() < 0.13) { rw += 3 + rnd(5); rh += 2 + rnd(4); }
       var x = 2 + rnd(Math.max(1, MAP_W - rw - 4)), y = 2 + rnd(Math.max(1, MAP_H - rh - 4));
       var ok = true;
       for (var j = 0; j < rooms.length; j++) {
@@ -399,15 +402,20 @@
     });
     function cx(r) { return r.x + (r.w >> 1); }
     function cy(r) { return r.y + (r.h >> 1); }
-    function corridor(ax, ay, bx, by) {
-      var x, y, k;
-      for (x = Math.min(ax, bx); x <= Math.max(ax, bx); x++) for (k = 0; k < corrW; k++) carve(x, ay + k);
-      for (y = Math.min(ay, by); y <= Math.max(ay, by); y++) for (k = 0; k < corrW; k++) carve(bx + k, y);
+    function corridor(ax, ay, bx, by, wide) {
+      var x, y, k, cw2 = wide || corrW;
+      for (x = Math.min(ax, bx); x <= Math.max(ax, bx); x++) for (k = 0; k < cw2; k++) carve(x, ay + k);
+      for (y = Math.min(ay, by); y <= Math.max(ay, by); y++) for (k = 0; k < cw2; k++) carve(bx + k, y);
     }
-    for (i = 1; i < rooms.length; i++) corridor(cx(rooms[i - 1]), cy(rooms[i - 1]), cx(rooms[i]), cy(rooms[i]));
-    for (i = 0; i < Math.round(rooms.length * 0.35); i++) {
+    // the main chain, with the odd wider run through it
+    for (i = 1; i < rooms.length; i++) {
+      corridor(cx(rooms[i - 1]), cy(rooms[i - 1]), cx(rooms[i]), cy(rooms[i]),
+               corrW + (Math.random() < 0.4 ? 1 : 0));
+    }
+    // loops are what stop a map being a row of dead ends: plenty of them
+    for (i = 0; i < Math.round(rooms.length * 0.45); i++) {
       var a = rooms[rnd(rooms.length)], b = rooms[rnd(rooms.length)];
-      corridor(cx(a), cy(a), cx(b), cy(b));
+      corridor(cx(a), cy(a), cx(b), cy(b), corrW + (Math.random() < 0.35 ? 1 : 0));
     }
     if (pillars) {
       rooms.forEach(function (r) {
@@ -1712,8 +1720,10 @@
     var span = FOOTPRINT[mode] || 118;
     if (mapKind === 'world' && mode !== 'tut') genWorld(span);
     else if (mode === 'duel' || mode === 'tut') genArena();
-    else genRooms(span, span, mode === 'br' ? 5 : 7, mode === 'war' ? 18 : 15,
-                  Math.round(span * span / 230), mode === 'br' ? 1 : 2, true);
+    // the divisor sets how packed the rooms are, and it moves every match, so
+    // one map comes out warren-tight and the next has more air in it
+    else genRooms(span, span, mode === 'br' ? 6 : 7, mode === 'war' ? 19 : 16,
+                  Math.round(span * span / (205 + rnd(60))), mode === 'br' ? 1 : 2, true);
 
     explored.fill(0);
     ents = []; bullets = []; sounds = []; parts = []; flashes = []; corpses = []; loot = [];
