@@ -123,6 +123,10 @@ h1 .gold{color:var(--gold)}
 .row button[aria-pressed="true"]{background:var(--gold);color:var(--out);font-weight:600}
 .row button:focus-visible{outline:3px solid var(--paper);outline-offset:-3px}
 .onlinehint{margin:-6px 0 0;max-width:46ch;font-family:var(--font-m);font-size:10px;line-height:1.6;color:var(--khaki);opacity:.85}
+.quickwait{display:flex;flex-direction:column;align-items:center;gap:2px;margin:6px 0 2px}
+.quickwait b{font-family:var(--font-d);font-weight:700;font-size:54px;line-height:1;color:var(--gold);font-variant-numeric:tabular-nums}
+.quickwait span{font-family:var(--font-m);font-size:10px;letter-spacing:.26em;color:var(--khaki)}
+.quickwait i{font-style:normal;font-family:var(--font-m);font-size:11px;letter-spacing:.14em;color:var(--text);margin-top:8px}
 .joinlabel{margin:10px 0 2px;font-family:var(--font-m);font-size:10px;letter-spacing:.18em;color:var(--gold)}
 .modedesc{margin:0;max-width:46ch;font-family:var(--font-m);font-size:11px;line-height:1.6;color:#c2b79f;min-height:2.2em}
 
@@ -293,11 +297,12 @@ h1 .gold{color:var(--gold)}
         <button class="go big" id="startBtn" type="button">PLAY</button>
         <div class="modesum" id="modeSum">BATTLE ROYALE &middot; CQB &middot; SOLO</div>
       </div>
-      <p class="onlinehint">QUICK PLAY looks for other people for 20 seconds, then starts and fills the empty seats with bots &#183; HOST A ROOM gives you a code to share</p>
+      <p class="onlinehint">QUICK PLAY waits for whoever turns up, then starts &#183; HOST A ROOM gives you a code to read out &#183; JOIN A ROOM takes someone else's code</p>
       <div class="mbtns">
         <button class="go ghost" id="optBtn" type="button" aria-expanded="false">MATCH OPTIONS</button>
         <button class="go ghost" id="quickBtn" type="button">QUICK PLAY</button>
         <button class="go ghost" id="onlineBtn" type="button">HOST A ROOM</button>
+        <button class="go ghost" id="joinBtn" type="button">JOIN A ROOM</button>
         <button class="go ghost" id="friendsBtn" type="button">FRIENDS</button>
         <button class="go ghost" id="shopBtn" type="button">SKINS &middot; <span id="menuCoins">0</span> CR</button>
         <button class="go ghost" id="setBtn" type="button">SETTINGS</button>
@@ -390,9 +395,14 @@ h1 .gold{color:var(--gold)}
   <div class="screen" id="online" hidden>
     <div class="panel">
       <div class="brand">
-        <h2 class="ptitle">ROOM</h2>
+        <h2 class="ptitle" id="onlineTitle">ROOM</h2>
         <div class="rule"></div>
-        <div class="tag">one of you hosts, everyone else types the code</div>
+        <div class="tag" id="onlineTag">one of you hosts, everyone else types the code</div>
+      </div>
+      <div class="quickwait" id="quickWait" hidden>
+        <b id="quickN">1</b>
+        <span id="quickLbl">PLAYER WAITING</span>
+        <i id="quickT">starting in 20s</i>
       </div>
       <p class="modedesc" id="netStatus">Host a room and read out the code, or type someone else's code below.</p>
       <div class="pbtns">
@@ -445,8 +455,8 @@ h1 .gold{color:var(--gold)}
           </div>
           <button class="go" id="partyStart" type="button">START MATCH</button>
         </div>
-        <p class="joinlabel">OR JOIN SOMEONE ELSE'S ROOM</p>
-        <div class="joinrow">
+        <p class="joinlabel" id="joinLabel">THE HOST'S CODE</p>
+        <div class="joinrow" id="joinRow">
           <input id="netJoinCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" aria-label="Room code">
           <button class="go ghost" id="netJoin" type="button">JOIN</button>
         </div>
