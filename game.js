@@ -1734,6 +1734,22 @@
   }
   function pickRespawnTile(e) {
     var best = null, bestScore = -1e9;
+    // Capture the flag: you always come back at your own flag
+    if (MODE.ctf && flags[e.team]) {
+      var fl = flags[e.team], fx = Math.floor(fl.hx / TILE), fy = Math.floor(fl.hy / TILE);
+      for (var k = 0; k < floorTiles.length; k++) {
+        var ft = floorTiles[k], ddx = ft.x - fx, ddy = ft.y - fy, dd = ddx * ddx + ddy * ddy;
+        if (dd < 2 || dd > 36 || !lineClear(fl.hx, fl.hy, ft.x * TILE + TILE / 2, ft.y * TILE + TILE / 2)) continue;
+        var fs = -dd + Math.random() * 12;          // close to the stand, a little spread
+        if (fs > bestScore) { bestScore = fs; best = ft; }
+      }
+      // a cramped stand with nothing in clear view: the nearest open floor instead
+      if (!best) for (k = 0; k < floorTiles.length; k++) {
+        ft = floorTiles[k]; ddx = ft.x - fx; ddy = ft.y - fy; dd = ddx * ddx + ddy * ddy;
+        if (dd >= 2 && -dd > bestScore) { bestScore = -dd; best = ft; }
+      }
+      if (best) return best;
+    }
     for (var i = 0; i < 48; i++) {
       var t = floorTiles[rnd(floorTiles.length)];
       var wx = t.x * TILE, wy = t.y * TILE, minD = 1e9, friend = 1e9;
