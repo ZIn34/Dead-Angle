@@ -7278,6 +7278,7 @@
   }
   var partyList = [];
   function partyRender() {
+    syncNetView();
     var el = $('partyList');
     if (!el) return;
     var names = netRole === 'host' ? partyNames() : (netRole === 'guest' ? partyList : []);
@@ -7288,7 +7289,7 @@
       d.textContent = (i === 0 ? '\u2605 ' : '') + nm;
       el.appendChild(d);
     });
-    el.hidden = !names.length;
+    el.hidden = !names.length || netView === 'quick';   // quick play shows a count, nothing else
     pchatVisible();
     // the host picks the match right here once anyone has joined
     var pp = $('partyPick');
@@ -7688,14 +7689,40 @@
   }
 
   // ---- the ONLINE screen ----
-  function openOnline() {
+  // Three ways in, and each one shows only its own half of this screen:
+  // waiting for strangers, handing out a code, or typing one in.
+  var netView = 'host';
+  function showIf(id, on) { var el = $(id); if (el) el.hidden = !on; }
+  function syncNetView() {
+    var hosting = netRole === 'host', joined = netRole === 'guest';
+    var quick = netView === 'quick';
+    $('onlineTitle').textContent = quick ? 'QUICK PLAY' : (netView === 'join' ? 'JOIN A ROOM' : 'ROOM');
+    $('onlineTag').textContent = quick ? 'waiting for whoever turns up'
+      : (netView === 'join' ? 'type the code the host reads out' : 'one of you hosts, everyone else types the code');
+    showIf('quickWait', quick);
+    showIf('netHost', netView === 'host' && !hosting && !joined);
+    showIf('netCodeBox', netView === 'host' && hosting && !!netCode);
+    showIf('joinLabel', netView === 'join' && !joined);
+    showIf('joinRow', netView === 'join' && !joined);
+    showIf('netLeave', !!netRole);
+    showIf('netStatus', !quick);
+    $('netLeave').textContent = quick ? 'STOP LOOKING' : 'LEAVE ROOM';
+  }
+  function openOnline(view) {
+    if (view) netView = view;
     elMenu.hidden = true;
     $('online').hidden = false;
     partyRender();
     if (typeof renderFriends === 'function') renderFriends();
-    if (!netRole) netStatus('One of you hosts and reads out the code; everyone else types it in. Works best on a normal home connection.');
+    if (!netRole && netView === 'host') netStatus('Press HOST A ROOM, then read the code out to everyone else.');
+    if (!netRole && netView === 'join') netStatus('Type the five letters the host reads out.');
+    syncNetView();
   }
-  $('onlineBtn').addEventListener('click', openOnline);
+  $('onlineBtn').addEventListener('click', function () { openOnline('host'); });
+  $('joinBtn').addEventListener('click', function () {
+    openOnline('join');
+    setTimeout(function () { try { $('netJoinCode').focus(); } catch (err) {} }, 30);
+  });
   $('netHost').addEventListener('click', function () { hostGame(); });
   $('netJoin').addEventListener('click', function () { joinGame($('netJoinCode').value); });
   $('netJoinCode').addEventListener('keydown', function (ev) {
@@ -8305,8 +8332,14 @@
     var n = humansIn(), cap = queueCap();
     if (queueSay <= 0) {
       queueSay = 0.5;
-      var msg = 'Waiting for players ' + n + '/' + cap + ' \u00b7 starting in ' + Math.max(0, Math.ceil(queueT)) + 's - bots fill any empty seats';
+      var left = Math.max(0, Math.ceil(queueT));
+      var msg = 'Waiting for players ' + n + '/' + cap + ' \u00b7 starting in ' + left + 's - bots fill any empty seats';
       quickStatus(msg);
+      if ($('quickN')) {
+        $('quickN').textContent = n;
+        $('quickLbl').textContent = n === 1 ? 'PLAYER WAITING' : 'PLAYERS WAITING';
+        $('quickT').textContent = 'starting in ' + left + 's';
+      }
       netSendAll({ t: 'queue', msg: msg });
     }
     if (n >= cap || queueT <= 0) {
@@ -8346,7 +8379,7 @@
   $('acctLogin').addEventListener('click', logIn);
   $('acctSignup').addEventListener('click', signUp);
   $('acctBack').addEventListener('click', closeAccount);
-  $('quickBtn').addEventListener('click', function () { quickBegin(); quickPlay(); });
+  $('quickBtn').addEventListener('click', function () { netView = 'quick'; quickBegin(); quickPlay(); });
   $('friendAdd').addEventListener('click', addFriend);
   $('chatSend').addEventListener('click', sendChat);
   $('chatBack').addEventListener('click', closeChat);
