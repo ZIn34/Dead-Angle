@@ -7699,6 +7699,7 @@
     showIf('joinLabel', netView === 'join' && !joined);
     showIf('joinRow', netView === 'join' && !joined);
     showIf('netLeave', !!netRole && !quick);     // BACK is the way out of waiting
+    showIf('linkBtn', !CG_MODE && netView === 'host' && hosting && !!netCode);
     showIf('netStatus', !quick);
   }
   function openOnline(view) {
@@ -8012,6 +8013,24 @@
     if (ev.key === 'Enter') takeName();
   });
   $('nameLogin').addEventListener('click', function () { $('namegate').hidden = true; openAccount(''); });
+
+  // Anyone can invite without an account: the room's own address.
+  function roomLink() {
+    return location.origin + location.pathname + '?room=' + netCode;
+  }
+  function copyRoomLink() {
+    if (!netCode) return;
+    var link = roomLink();
+    var done = function () { netStatus('Link copied - send it to whoever you want in.'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, function () { netStatus(link); });
+    else netStatus(link);
+  }
+  if ($('linkBtn')) $('linkBtn').addEventListener('click', copyRoomLink);
+  // and opening that link drops you straight into their room
+  function roomFromUrl() {
+    var m = /[?&]room=([A-Za-z0-9]{3,8})/.exec(location.search || '');
+    return m ? m[1].toUpperCase() : '';
+  }
 
   function openAccount(msg) {
     ['menu', 'online', 'friends'].forEach(function (id) { $(id).hidden = true; });
@@ -8381,7 +8400,11 @@
     ev.stopPropagation();
     if (ev.key === 'Enter') sendChat();
   });
-  $('friendsBtn').addEventListener('click', openFriends);
+  $('friendsBtn').addEventListener('click', function () {
+    // a guest has no friends list to show, so send them where it is made
+    if (isGuest()) { openAccount('Friends need an account. It takes a moment, and your name and credits come with you.'); return; }
+    openFriends();
+  });
   $('friendsBack').addEventListener('click', function () { $('friends').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('friendsNeed').addEventListener('click', function () { openAccount(''); });
   $('inviteJoin').addEventListener('click', function () { answerInvite(true); });
@@ -8433,5 +8456,18 @@
   renderAcct();                       // show the name we came in with
   cgInit();
   if (!CG_MODE && needName()) openNameGate('');
+  // someone sent you a room link: go there as soon as you have a name
+  (function () {
+    var want = roomFromUrl();
+    if (!want || CG_MODE) return;
+    var tryJoin = function () {
+      if (needName()) { setTimeout(tryJoin, 400); return; }
+      openOnline('join');
+      $('netJoinCode').value = want;
+      netStatus('Joining the room from your link...');
+      joinGame(want);
+    };
+    setTimeout(tryJoin, 300);
+  })();
   requestAnimationFrame(frame);
 })();
