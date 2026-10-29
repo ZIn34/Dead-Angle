@@ -7069,6 +7069,18 @@
   }
 
   var NET_SEE = 1500;                       // how far a guest is told about
+  // The host pays for every guest separately, so a full room sends a little
+  // less often and tells each person about a little less of the map. Six
+  // friends notice nothing; twenty people get a match that still keeps up on
+  // an ordinary home connection.
+  function seeRadius() {
+    var n = netGuests.length;
+    return n > 12 ? 1050 : (n > 6 ? 1250 : NET_SEE);
+  }
+  function sendHz() {
+    var n = netGuests.length;
+    return n > 12 ? 12 : (n > 6 ? 15 : 20);
+  }
   // A dead guest watches a teammate, so their slice of the world follows that
   // teammate instead of their own body.
   function guestEye(g) {
@@ -7082,18 +7094,22 @@
   function nearGuest(g, x, y) {
     var ge = guestEye(g);
     if (!ge) return true;
-    var dx = x - ge.x, dy = y - ge.y;
-    return dx * dx + dy * dy < NET_SEE * NET_SEE;
+    var dx = x - ge.x, dy = y - ge.y, r = seeRadius();
+    return dx * dx + dy * dy < r * r;
   }
+  // two decimals is finer than a pixel at this zoom, and a tenth of a second
+  // is finer than a frame: the rest was just characters on the wire
+  function r2(v) { return Math.round((v || 0) * 100) / 100; }
+  function r1(v) { return Math.round((v || 0) * 10) / 10; }
   function packEnt(e) {
     var s0 = e.slots[0], s1 = e.slots[1];
     var bits = (e.alive ? 1 : 0) | (e.down ? 2 : 0) | (e.moving ? 4 : 0) |
                (e.air === 'plane' ? 8 : 0) | (e.air === 'chute' ? 16 : 0) | (e.bot ? 32 : 0) | (e.bleeding ? 64 : 0);
-    return [e.id, Math.round(e.x), Math.round(e.y), e.ang, e.team, e.skin, bits, e.animT || 0, e.animFire || 0, e.swingT || 0,
-            e.throwT || 0, e.meleeT || 0, Math.round(e.hp), e.revT || 0, e.downT || 0, e.respawnT || 0,
-            e.level || 0, e.airT || 0, e.name, e.slot,
+    return [e.id, Math.round(e.x), Math.round(e.y), r2(e.ang), e.team, e.skin, bits, r2(e.animT), r2(e.animFire), r2(e.swingT),
+            r2(e.throwT), r2(e.meleeT), Math.round(e.hp), r1(e.revT), r1(e.downT), r1(e.respawnT),
+            e.level || 0, r1(e.airT), e.name, e.slot,
             s0 ? WKEYS.indexOf(s0.key) : -1, s0 ? s0.ammo : 0, s1 ? WKEYS.indexOf(s1.key) : -1, s1 ? s1.ammo : 0,
-            e.reserve, e.meds, e.nades, e.smokes, e.reloadT || 0, e.useT || 0, e.kills || 0];
+            e.reserve, e.meds, e.nades, e.smokes, r2(e.reloadT), r2(e.useT), e.kills || 0];
   }
   function sigOf(list) {
     var h = list.length;
@@ -7115,11 +7131,18 @@
   function unpackMark(a) {
     return { x: a[0], y: a[1], ang: a[2], scale: a[3], t: a[4] };
   }
-  function nearOnly(g, arr) {
-    var out = [];
-    for (var i = 0; i < arr.length; i++) if (nearGuest(g, arr[i].x, arr[i].y)) out.push(arr[i]);
+  function nearOnly(g, arr, radius) {
+    var out = [], eye = guestEye(g);
+    if (!eye) return arr.slice();
+    var r = radius || seeRadius();
+    for (var i = 0; i < arr.length; i++) {
+      var dx = arr[i].x - eye.x, dy = arr[i].y - eye.y;
+      if (dx * dx + dy * dy < r * r) out.push(arr[i]);
+    }
     return out;
   }
+  // loot is only any use within reach of it, so it travels a shorter way
+  var LOOT_SEE = 640;
   function listSig(arr) {
     var h = arr.length;
     for (var i = 0; i < arr.length; i++) h = (h * 31 + (arr[i].x | 0) + (arr[i].y | 0) * 7 + (arr[i].ammo | 0)) | 0;
@@ -7144,7 +7167,7 @@
     if (!netHostLive()) { netEv.length = 0; return; }
     netSendT -= dt;
     if (netSendT > 0) return;
-    netSendT = 1 / 20;
+    netSendT = 1 / sendHz();
     // everything everyone sees, serialised once
     var shared = netStr({
       t: 's', hold: state === 'paused',
@@ -7153,8 +7176,7 @@
       }),
       se: sectors, z: zone, p: plane,
 
-      h: [alive, score[0], score[1], round, roundClock, roundBreak, zombClock, matchTime, fieldN],
-      ev: netEv
+      h: [alive, score[0], score[1], round, roundClock, roundBreak, zombClock, matchTime, fieldN]
     });
 
     for (var gi = 0; gi < netGuests.length; gi++) {
@@ -7176,9 +7198,27 @@
         var bu = bullets[bi];
         if (nearGuest(g, bu.x, bu.y)) x.b.push([Math.round(bu.x), Math.round(bu.y), Math.round(bu.vx), Math.round(bu.vy), bu.owner]);
       }
+      // a shot on the far side of the map is nobody's business here, but
+      // sound carries much further than sparks do, and the kill feed is for
+      // everyone
+      x.ev = [];
+      var eye = guestEye(g), sr = seeRadius();
+      for (var vi = 0; vi < netEv.length; vi++) {
+        var q = netEv[vi], kind = q[0];
+        if (kind === 'f') { x.ev.push(q); continue; }
+        if (kind === 'c') { if (q[1] === g.ent.id) x.ev.push(q); continue; }
+        if (!eye) { x.ev.push(q); continue; }
+        var reach = kind === 'a' ? 2600 : sr;
+        var edx = q[1] - eye.x, edy = q[2] - eye.y;
+        if (edx * edx + edy * edy <= reach * reach) x.ev.push(q);
+      }
       x.pg = pings.filter(function (q) { return q.team === g.ent.team; });
-      x.f = flashes.filter(function (q) { return nearGuest(g, q.x, q.y); });
-      x.im = impacts.filter(function (q) { return nearGuest(g, q.x, q.y); });
+      x.f = flashes.filter(function (q) { return nearGuest(g, q.x, q.y); }).map(function (q) {
+        return { x: Math.round(q.x), y: Math.round(q.y), ang: r2(q.ang), t: r2(q.t), max: r2(q.max), tint: q.tint, scale: r2(q.scale) };
+      });
+      x.im = impacts.filter(function (q) { return nearGuest(g, q.x, q.y); }).map(function (q) {
+        return { x: Math.round(q.x), y: Math.round(q.y), ang: r2(q.ang), t: r2(q.t), scale: r2(q.scale), fx: q.fx };
+      });
       x.sm = smokes.filter(function (q) { return nearGuest(g, q.x, q.y); });
       if (blackout) x.so = sounds.filter(function (q) { return nearGuest(g, q.x, q.y); }).map(function (q) {
         return { x: Math.round(q.x), y: Math.round(q.y), r: Math.round(q.r), maxR: q.maxR, speed: q.speed, color: q.color, w: q.w, kind: q.kind, owner: q.owner };
@@ -7192,7 +7232,7 @@
       // traffic in a full battle royale.
       g.clut = (g.clut || 0) + 1;
       if (!g.ent.air && g.clut % 5 === 0) {
-        var near = nearOnly(g, loot), sg = listSig(near);
+        var near = nearOnly(g, loot, LOOT_SEE), sg = listSig(near);
         if (g.sigs.lo !== sg) { g.sigs.lo = sg; x.lo = near.map(packLoot); }
         near = nearOnly(g, decals); sg = listSig(near);
         if (g.sigs.dc !== sg) { g.sigs.dc = sg; x.dc = near.map(packMark); }
