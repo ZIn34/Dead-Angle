@@ -6938,8 +6938,8 @@
         netRole = 'host'; netCode = code;
         $('netCode').textContent = code;
         $('netCodeBox').hidden = false;
-        netStatus(CG_MODE ? 'Party open. Share the invite link or this code.'
-                          : 'Party open. Friends join with this code, or invite them from your friends list.');
+        netStatus(CG_MODE ? 'Room open. Share the invite link or this code.'
+                          : 'Room open. Everyone joins with this code, or from your friends list.');
         partyRender();
         cgRoom();
         syncMenu();
@@ -7372,7 +7372,7 @@
           opened = true;
           netRole = 'guest'; netCode = code;
           netSend({ t: 'hi', skin: WALLET.skin, name: playerName(), uid: acctUid(), pub: !!pub });
-          netStatus(pub ? 'Joining a match...' : 'Connected! Waiting for the host to start a match.');
+          netStatus(pub ? 'Joining a match...' : 'Connected. Waiting for the host to start the match.');
           syncMenu();
           cgRoom();
         });
@@ -7400,7 +7400,7 @@
     else if (m.t === 'pchat') pchatAdd(m.from, m.text);
     else if (m.t === 'party') {
       partyList = m.names || []; partyRender();
-      if (!netGuest && m.pick) netStatus('In the party. The host picked ' + m.pick + ' - waiting for them to start.');
+      if (!netGuest && m.pick) netStatus('In the room. The host picked ' + m.pick + ' - waiting for them to start.');
     }
     else if (m.t === 'wait') netStatus(m.why);
     else if (m.t === 'queue') netStatus(m.msg);
@@ -7683,7 +7683,7 @@
     $('online').hidden = false;
     partyRender();
     if (typeof renderFriends === 'function') renderFriends();
-    if (!netRole) netStatus('One of you hosts, the other joins with the code. Works best on a normal home connection.');
+    if (!netRole) netStatus('One of you hosts and reads out the code; everyone else types it in. Works best on a normal home connection.');
   }
   $('onlineBtn').addEventListener('click', openOnline);
   $('netHost').addEventListener('click', function () { hostGame(); });
@@ -8254,7 +8254,7 @@
       });
       return;
     }
-    if (netRole === 'guest') { openOnline(); netStatus('You are in a party - the leader starts the match.'); return; }
+    if (netRole === 'guest') { openOnline(); netStatus('You are in a room - the host starts the match.'); return; }
     initAudio();
     if (netRole === 'host' && netGuests.length) { goPublicHost(); return; }
     if (netRole) netClose('');
