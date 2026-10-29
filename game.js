@@ -109,7 +109,7 @@
   var elSlot = [$('slot0'), $('slot1')];
   var elRelBar = $('relBar'), elRelFill = $('relFill');
 
-  var cw = 0, ch = 0, dpr = 1, zoom = 1, zoom0 = 1;
+  var cw = 0, ch = 0, dpr = 1, zoom = 1, zoom0 = 1, uiS = 1;
   // The sniper is the long-range gun, so holding one opens the view up: twice
   // the sight, and the camera pulls back by the same amount so you can use it.
   var SNIPE_SIGHT = 2, VIEW_MUL = 1;
@@ -132,7 +132,10 @@
     ch = canvas.clientHeight || window.innerHeight;
     canvas.width = Math.max(1, Math.round(cw * dpr));
     canvas.height = Math.max(1, Math.round(ch * dpr));
-    zoom = zoom0 = Math.max(0.55, Math.min(2.4, Math.min(cw, ch) / (VIEW_BASE * 2 + 60)));
+    zoom = zoom0 = Math.max(0.55, Math.min(2.4, Math.min(cw, ch) / (VIEW_BASE * 2)));
+    // the HUD grows with the screen, so it reads the same at 1080p as at 720p
+    uiS = clamp(ch / 720, 1, 1.6);
+    document.documentElement.style.setProperty('--ui', uiS.toFixed(3));
   }
   window.addEventListener('resize', resize);
 
@@ -222,8 +225,18 @@
       music.play().catch(function () {});
     } catch (err) { music = null; }
   }
+  // Sound is held (silent, music paused) while the tab is hidden or an ad plays.
+  var soundHolds = {};
+  function soundHeld() { for (var k in soundHolds) if (soundHolds[k]) return true; return false; }
+  function holdSound(why, on) {
+    soundHolds[why] = !!on;
+    var held = soundHeld();
+    if (music) { if (held) music.pause(); }
+    if (actx) { try { if (held) actx.suspend(); else actx.resume(); } catch (err) {} }
+  }
+  document.addEventListener('visibilitychange', function () { holdSound('hidden', document.hidden); });
   function musicLevel() {
-    if (muted) return 0;
+    if (muted || soundHeld()) return 0;
     var inMatch = state === 'play' || state === 'paused' || state === 'ending';
     return clamp((SET.music / 100) * (SET.vol / 100) * (inMatch ? 0.5 : 1), 0, 1);
   }
@@ -231,7 +244,7 @@
     if (!music) return;
     var want = musicLevel();
     music.volume = clamp(music.volume + (want - music.volume) * 0.06, 0, 1);
-    if (want > 0 && music.paused) music.play().catch(function () {});
+    if (want > 0 && music.paused && !soundHeld()) music.play().catch(function () {});
   }
   // browsers only allow sound after the player has done something
   ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) {
@@ -306,7 +319,7 @@
 
   function audioEmit(x, y, def, owner) {
     if (netRole === 'host' && netHostLive()) netEv.push(['a', Math.round(x), Math.round(y), netDefId(def), owner]);
-    if (!actx || muted || !player) return;
+    if (!actx || muted || soundHeld() || !player) return;
     if (!def.aud && !def.sample) return;
     // heard from your own spot if it is yours, else from the nearer player
     var oe = owner >= 0 ? ents[owner] : null;
@@ -584,7 +597,7 @@
 
   // You see what is in front of you, plus a little circle right around you
   // (you would feel someone at your back). Bots get the same eyes.
-  var FOV_HALF = CG_MODE ? 1.28 : 0.96, NEAR_SEE = CG_MODE ? 120 : 60;
+  var FOV_HALF = 1.28, NEAR_SEE = 120;
   function inCone(e, x, y, half) {
     var dx = x - e.x, dy = y - e.y;
     if (dx * dx + dy * dy <= NEAR_SEE * NEAR_SEE) return true;
@@ -1081,6 +1094,43 @@
     ctx.fill();
   }
 
+  // Ground you have seen but cannot see now: the same floor tiles and the same
+  // gold-edged walls as in the light, dimmed, so the map reads as a place
+  // rather than flat blocks.
+  // a faint diagonal hatch over the tops of walls, so they read as solid mass
+  var wallHatch = null;
+  function hatch() {
+    if (wallHatch) return wallHatch;
+    var c = document.createElement('canvas'); c.width = c.height = 10;
+    var g = c.getContext('2d');
+    g.strokeStyle = 'rgba(200,220,240,.07)'; g.lineWidth = 1.4;
+    g.beginPath(); g.moveTo(-2, 12); g.lineTo(12, -2); g.moveTo(8, 12); g.lineTo(12, 8); g.moveTo(-2, 2); g.lineTo(2, -2); g.stroke();
+    wallHatch = ctx.createPattern(c, 'repeat');
+    return wallHatch;
+  }
+  function drawMemory(r0, r1, t0, t1) {
+    var ty, tx, i;
+    tilePass(r0, r1, t0, t1, true, false, 0, floorPat || '#1a2531');
+    tilePass(r0, r1, t0, t1, true, false, 0, 'rgba(5,9,14,.74)');
+    tilePass(r0, r1, t0, t1, true, true, 0, '#1b2735');
+    tilePass(r0, r1, t0, t1, true, true, 0, hatch());
+    var shade = new Path2D(), edge = new Path2D(), lip = new Path2D(), sh = TILE * 0.32;
+    for (ty = r0; ty <= r1; ty++) for (tx = t0; tx <= t1; tx++) {
+      i = ty * STRIDE + tx;
+      if (!explored[i] || grid[i] !== 1) continue;
+      var x = tx * TILE, y = ty * TILE;
+      var up = ty > 0 && grid[i - STRIDE] !== 1, dn = ty < MAP_H - 1 && grid[i + STRIDE] !== 1;
+      var lf = tx > 0 && grid[i - 1] !== 1, rt = tx < MAP_W - 1 && grid[i + 1] !== 1;
+      if (dn) { shade.rect(x, y + TILE, TILE, sh); edge.moveTo(x, y + TILE); edge.lineTo(x + TILE, y + TILE); }
+      if (rt) { shade.rect(x + TILE, y, sh, TILE); edge.moveTo(x + TILE, y); edge.lineTo(x + TILE, y + TILE); }
+      if (up) { edge.moveTo(x, y); edge.lineTo(x + TILE, y); lip.rect(x, y, TILE, TILE * 0.18); }
+      if (lf) { edge.moveTo(x, y); edge.lineTo(x, y + TILE); }
+    }
+    ctx.fillStyle = 'rgba(0,0,0,.32)'; ctx.fill(shade);
+    ctx.fillStyle = 'rgba(120,150,180,.07)'; ctx.fill(lip);
+    ctx.strokeStyle = 'rgba(242,189,29,.26)'; ctx.lineWidth = 1.6 / zoom; ctx.stroke(edge);
+  }
+
   var exploreTick = 0;
   function markExplored(px, py) {
     var step = TILE * 0.55;
@@ -1209,9 +1259,6 @@
   var BASE_SKIN = 9;
   var WALLET = { coins: 0, owned: [BASE_SKIN], skin: BASE_SKIN };
   var CG_MODE = window.DEAD_ANGLE_PLATFORM === 'crazygames';
-  // CrazyGames is a PEGI 12 site with a lot of daylight games on it. Their
-  // build keeps the same fight but loses the blood and opens the view up.
-  var GORE = !CG_MODE;
   var CG = null;                          // the CrazyGames SDK, once it is ready
   function storeGet(k) {
     try {
@@ -1242,6 +1289,10 @@
   function skinPrice(i) { return i === BASE_SKIN ? 0 : (i >= 12 ? 500 : 200); }
 
   var SET = { vol: 66, music: 45, dead: 18, shake: true, minimap: true, blood: true };
+  // Blood is a setting and nothing else. CrazyGames is a PEGI 12 site, so
+  // their build starts with it off; anyone can turn it on in SETTINGS, and
+  // loadSettings below brings back whatever they chose last time.
+  if (CG_MODE) SET.blood = false;
   function loadSettings() {
     try {
       var raw = storeGet('earshot.settings');
@@ -1313,7 +1364,23 @@
   // host side: everyone connected to us. { conn, name, skin, uid, party, in, ent, sigs }
   var netGuests = [], netPublic = false, netCode = '';
   var acctName = '';                 // the signed-in username, if any
-  var NET_MAX = 8;                   // people in one match, host included
+  var guestName = '';                // the name you typed on the way in
+  var guestEarned = 0;               // credits earned since you last signed in
+  function playerName() { return acctName || guestName || 'PLAYER'; }
+  function guestTail() {
+    return (isGuest() && WALLET.coins) ? '  Playing as a guest - sign in before you leave to keep your credits.' : '';
+  }
+  function isGuest() { return !(fbUser && acctName); }
+  function needName() { return !acctName && !guestName; }
+  function loadName() { try { guestName = storeGet('earshot.name') || ''; } catch (err) {} }
+  function setGuestName(n) {
+    n = String(n || '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 16);
+    if (n.length < 2) return false;
+    guestName = n;
+    storeSet('earshot.name', n);
+    return true;
+  }
+  var NET_MAX = 48;                  // people in one match, host included (a full battle royale)
   // on this machine (not merely human - remote guests are local to the host's sim)
   function onHere(e) { return !!(e && e.local && !(e.ctl && e.ctl.net)); }
   var netGuestSkin = 0, netHostHeld = false;
@@ -1608,7 +1675,8 @@
       e.slots = [{ key: 'rifle', ammo: WEAPONS.rifle.mag }, { key: 'pistol', ammo: WEAPONS.pistol.mag }];
       e.slot = 0; e.reserve = 120; e.meds = 1; e.nades = 2; e.smokes = 1;
     } else {
-      e.slots = [null, null]; e.slot = 0; e.reserve = START_RESERVE; e.meds = 0; e.nades = 0; e.smokes = 0;
+      // battle royale: everyone lands with a pistol, so the first fight comes quickly
+      e.slots = [{ key: 'pistol', ammo: WEAPONS.pistol.mag }, null]; e.slot = 0; e.reserve = START_RESERVE; e.meds = 0; e.nades = 0; e.smokes = 0;
     }
   }
   function placeEnt(e, tile) {
@@ -1634,6 +1702,7 @@
   // ---------------------------------------------------------------- match
   function startMatch() {
     initAudio();
+    if (mode !== 'tut') matchesPlayed++;
     matchToken++;
     MODE = MODES[mode];
     VIEW_R = blackout ? VIEW_BLACKOUT : VIEW_BASE;
@@ -1681,7 +1750,7 @@
     var online = netRole === 'host' && netGuests.length > 0 && mode !== 'tut';
     var sc = (online || mode === 'tut') ? null : (splitWant ? splitControls() : null);
     if (!online && splitWant && !sc) feed('split screen needs a <b>controller</b> for player 2', true);
-    if (netRole === 'host') player.name = acctName || 'HOST';
+    if (netRole === 'host') player.name = playerName();
     for (var gq = 0; gq < netGuests.length; gq++) netGuests[gq].ent = null;
     if (sc) {
       var p2 = makeEnt(sp[1 % sp.length], true, 'P2');
@@ -1851,7 +1920,7 @@
       if (!e.alive) continue;
       if (e.air === 'plane') {
         e.x = plane.x; e.y = plane.y;
-        var late = plane.t >= plane.dur * 0.93 || (!inWorld && plane.t > plane.dur * 0.5);
+        var late = plane.t >= dropDeadline() || (!inWorld && plane.t > plane.dur * 0.5);
         if (inWorld && (late || (e.bot && !e.follow && plane.t >= e.dropAt))) jumpOut(e);
         else if (late && !inWorld) {
           // flew past the edge: tip them out over the last stretch of land
@@ -1883,7 +1952,9 @@
 
   // Your own hands in the air: jump from the plane, then steer the chute.
   // the door opens a few seconds in, once the plane is over the island
-  var JUMP_AFTER = 5;
+  var JUMP_AFTER = 2;
+  // everyone still aboard is tipped out a few seconds after the door opens
+  function dropDeadline() { return Math.min(plane.dur * 0.93, JUMP_AFTER + 5); }
   function jumpOpen() { return !!plane && plane.t >= JUMP_AFTER && !!plane.overLand; }
   function airControl(e, I, dt) {
     if (e.air === 'plane') {
@@ -1915,52 +1986,20 @@
   // A small arena, three standing targets, and one thing to learn at a time.
   // Each step waits for you to actually do it.
   var tut = { i: 0, t: 0, moved: 0, sprint: 0, kills: 0, lx: 0, ly: 0, slotWas: 0, flash: 0 };
+  // Five steps: the basics, then straight into a match. Everything else
+  // (sprint, frags, smoke, stims, melee) sits on the HUD and the menu.
   var TUT = [
     { title: 'MOVE', k: 'Walk around', p: 'Walk around', g: { wasd: 1 }, gp: { caps: ['LEFT STICK'] },
       done: function () { return tut.moved > 260; } },
-    { title: 'AIM', k: 'You always face the cursor', p: 'You face where the stick points',
-      g: { mouse: 'move' }, gp: { caps: ['RIGHT STICK'] },
-      done: function () { return tut.t > 2.5; } },
-    { title: 'SHOOT', k: 'Shoot a target', p: 'Shoot a target', mark: 'targets',
+    { title: 'SHOOT', k: 'Aim with the mouse and shoot a target', p: 'Aim with the right stick and shoot a target', mark: 'targets',
       g: { mouse: 'left' }, gp: { caps: ['RT'] },
       done: function () { return tut.hits >= 1; } },
-    { title: 'RELOAD', k: 'Reload', p: 'Reload', g: { caps: ['R'] }, gp: { caps: ['A'] },
-      start: function () { var sl = curSlot(player); if (sl) sl.ammo = Math.min(sl.ammo, 4); },
-      done: function () { return player.reloadT > 0; } },
     { title: 'PICK UP', k: 'Take the rifle', p: 'Take the rifle', mark: 'item',
       g: { caps: ['E'] }, gp: { caps: ['X'] },
       start: function () { tutDrop('gun', 'silenced'); },
       done: function () { return hasGun(player, 'silenced'); } },
-    { title: 'SWAP', k: 'Swap weapons', p: 'Swap weapons',
-      g: { caps: ['Q', '1', '2'] }, gp: { caps: ['LB', 'RB'] },
-      start: function () { tut.slotWas = player.slot; },
-      done: function () { return player.slot !== tut.slotWas; } },
-    { title: 'SPRINT', k: 'Hold it while walking - fast, but loud', p: 'Hold it while walking - fast, but loud',
-      g: { caps: ['SHIFT'] }, gp: { caps: ['LT'] },
-      done: function () { return tut.sprint > 1.2; } },
-    { title: 'FRAG', k: 'Throw a frag at the group', p: 'Throw a frag at the group', mark: 'targets',
-      g: { caps: ['G'] }, gp: { caps: ['D-PAD LEFT'] },
-      start: function () { player.nades = Math.max(player.nades, 1); tut.have = player.nades; },
-      done: function () { return player.nades < tut.have; } },
-    { title: 'SMOKE', k: 'Throw smoke - nobody sees through it', p: 'Throw smoke - nobody sees through it',
-      g: { caps: ['H'] }, gp: { caps: ['D-PAD RIGHT'] },
-      start: function () { player.smokes = Math.max(player.smokes, 1); tut.have = player.smokes; },
-      done: function () { return player.smokes < tut.have; } },
-    { title: 'HEAL', k: 'You are hurt - use a stim', p: 'You are hurt - use a stim',
-      g: { caps: ['F'] }, gp: { caps: ['Y'] },
-      start: function () { player.hp = Math.min(player.hp, 45); player.meds = Math.max(player.meds, 1); tut.have = player.meds; },
-      done: function () { return player.meds < tut.have; } },
-    { title: 'MELEE', k: 'Swing the gun butt - works with no ammo', p: 'Swing the gun butt - works with no ammo',
-      g: { caps: ['V'] }, gp: { caps: ['D-PAD UP'] },
-      done: function () { return player.meleeT > 0; } },
-    { title: 'LISTEN', k: 'Every shot and footstep makes noise, and bots hunt by ear. In BLACKOUT you only see sound rings - a muzzle flash is the one exact giveaway.',
-      p: null, wait: 7, done: function () { return tut.t > 7; } },
-    { title: 'TEAM UP', k: 'In squad and team modes, stand beside a downed teammate to revive them. Blue markers are always your side.',
-      p: null, wait: 7, done: function () { return tut.t > 7; } },
-    { title: 'DROP IN', k: 'Battle royale starts in a plane: SPACE to jump, then steer your chute with W A S D. Stay inside the closing ring.',
-      p: 'Battle royale starts in a plane: A to jump, then steer your chute with the LEFT STICK. Stay inside the closing ring.',
-      wait: 8, done: function () { return tut.t > 8; } },
-    { title: 'READY', k: 'That is everything.', p: 'That is everything.',
+    { title: 'READY', k: 'That is the basics. Frags, smoke and stims are on the HUD; the menu lists every control. Your first match starts now.',
+      p: 'That is the basics. Frags, smoke and stims are on the HUD; the menu lists every control. Your first match starts now.',
       g: { caps: ['ENTER'] }, gp: { caps: ['A'] },
       last: true, done: function () { return false; } }
   ];
@@ -2024,7 +2063,7 @@
     if (st.last) {
       var go = !!keys['enter'] || padDown(0);
       // leave after this frame finishes - the rest of it still expects a tutorial
-      if (go && !tutEnterPrev) { tut.leaving = true; setTimeout(tutDone, 0); }
+      if ((go && !tutEnterPrev) || tut.t > 4) { tut.leaving = true; setTimeout(function () { tutDone(true); }, 0); }
       tutEnterPrev = go;
       return;
     }
@@ -2041,16 +2080,18 @@
     setTimeout(tutDone, 0);
   }
   if ($('tutSkip')) $('tutSkip').addEventListener('click', tutLeave);
-  function tutDone() {
+  function tutDone(play) {
     storeSet('earshot.tutDone', '1');
     goHome();
     syncTutBtn();
+    // finished (not skipped): straight on into a match
+    if (play === true) setTimeout(function () { if (state === 'menu') $('startBtn').click(); }, 0);
   }
   function syncTutBtn() {
     var done = false;
     done = storeGet('earshot.tutDone') === '1';
     var b = $('tutBtn');
-    if (b) { b.className = done ? 'go ghost' : 'go'; b.textContent = done ? 'TUTORIAL' : 'TUTORIAL \u2014 START HERE'; }
+    if (b) { b.className = 'go ghost'; b.textContent = done ? 'TUTORIAL' : 'TUTORIAL \u2014 START HERE'; }
   }
   // A key cap, drawn the way it looks under a finger. Showing the control
   // beats another sentence about it.
@@ -2080,18 +2121,28 @@
     capBox('A', cx - 40, y + 34); capBox('S', cx, y + 34); capBox('D', cx + 40, y + 34);
   }
   function mouseGlyph(cx, y, kind) {
-    var w = 30, h = 42, x = cx - w / 2;
-    ctx.fillStyle = '#f1e7d0'; ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 3;
-    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    var w = 30, h = 42, x = cx - w / 2, r = w / 2;
+    // a mouse: round on top, a little flatter underneath
+    var body = new Path2D();
+    body.moveTo(x, y + r);
+    body.arc(cx, y + r, r, Math.PI, 0);
+    body.lineTo(x + w, y + h - 11);
+    body.quadraticCurveTo(x + w, y + h, cx, y + h);
+    body.quadraticCurveTo(x, y + h, x, y + h - 11);
+    body.closePath();
+    ctx.fillStyle = '#f1e7d0'; ctx.fill(body);
     if (kind === 'left') {                       // the button you press, lit
+      ctx.save(); ctx.clip(body);
       ctx.fillStyle = '#f2bd1d';
-      ctx.fillRect(x + 2, y + 2, w / 2 - 3, h / 3 - 1);
+      ctx.fillRect(x, y, w / 2, h * 0.42);
+      ctx.restore();
     }
     ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(x, y + h / 3); ctx.lineTo(x + w, y + h / 3);
-    ctx.moveTo(cx, y); ctx.lineTo(cx, y + h / 3);
+    ctx.moveTo(x, y + h * 0.42); ctx.lineTo(x + w, y + h * 0.42);
+    ctx.moveTo(cx, y); ctx.lineTo(cx, y + h * 0.42);
     ctx.stroke();
+    ctx.lineWidth = 3; ctx.stroke(body);
     if (kind === 'move') {                       // a nudge either way
       ctx.strokeStyle = '#f2bd1d'; ctx.lineWidth = 3;
       ctx.beginPath();
@@ -2264,7 +2315,7 @@
   }
   function bloodOf(e) { return (e && isZombie(e)) ? 'zomb' : 'red'; }
   function addSplat(x, y, r, pal, kind) {
-    if (!SET.blood || !GORE) return;
+    if (!SET.blood) return;
     if (splats.length >= SPLAT_MAX) splats.shift();
     splats.push({ x: x, y: y, r: r, ang: Math.random() * 6.2832, v: rnd(6), pal: pal, t: 0,
                   grow: kind === 'pool' ? 2.4 : 0.12, kind: kind || 'drop' });
@@ -2272,7 +2323,7 @@
   // x, y: where; ang: the way the round was travelling; amount: how hard
   function bleed(x, y, ang, amount, big, pal) {
     if (netRole === 'host' && netHostLive()) netEv.push(['g', Math.round(x), Math.round(y), +(ang || 0).toFixed(2), Math.round(amount), big ? 1 : 0, pal || 'red']);
-    if (!SET.blood || !GORE) { spark(x, y, big ? 10 : 4, '196,204,214', 120); return; }
+    if (!SET.blood) { spark(x, y, big ? 10 : 4, '196,204,214', 120); return; }
     pal = pal || 'red';
     if (ang === undefined || ang === null || isNaN(ang)) ang = Math.random() * 6.2832;
     var n = Math.min(26, 4 + Math.round(amount / 5) + (big ? 12 : 0));
@@ -2624,6 +2675,8 @@
     if (godMode && e === player) return;
     e.hp -= amount;
     e.useT = 0;
+    e.hitAt = performance.now();
+    if (hitBy && hitBy !== e && hitBy.local) { hitBy.hmAt = e.hitAt; hitBy.hmKill = e.hp <= 0; }
     // shot down to half or worse: bleeding until a stim closes it up
     if (e.hp > 0 && e.hp <= 50 && !isZombie(e) && hitBy && hitBy !== e && !e.down) {
       if (!e.bleeding && e.local) feed('<b>BLEEDING</b> - use a stim', true);
@@ -2633,7 +2686,7 @@
     if (e.bot) { e.flinch = 0.35; if (e.aimOff !== undefined) e.aimOff += rr(-0.06, 0.06); }
     bleed(e.x, e.y, ang, amount, false, bloodOf(e));
     e.lastHitAng = ang;
-    if (FX.blood && SET.blood && GORE && amount >= 30) {
+    if (FX.blood && SET.blood && amount >= 30) {
       if (decals.length > 90) decals.shift();
       decals.push({
         x: e.x + Math.cos(ang) * 5, y: e.y + Math.sin(ang) * 5,
@@ -2686,7 +2739,7 @@
     corpses.push({ x: e.x, y: e.y });
     bleed(e.x, e.y, e.lastHitAng, 60, true, bloodOf(e));
     audioEmit(e.x, e.y, DEATH_SND, -1);
-    if (FX.death && SET.blood && GORE) {
+    if (FX.death && SET.blood) {
       if (deaths.length > 60) deaths.shift();
       deaths.push({ x: e.x, y: e.y, ang: Math.random() * 6.2832, t: 0, scale: rr(0.95, 1.25) });
     }
@@ -2884,6 +2937,7 @@
     if (won) cgGame('happytime');
     var earned = kills * 12 + Math.round(matchTime / 6) + (won ? 80 : 0);
     WALLET.coins += earned;
+    if (isGuest()) guestEarned += earned;
     saveWallet();
     result = { big: big, small: small, won: won, earned: earned };
     overCause = msg + '  +' + earned + ' credits.';
@@ -2910,14 +2964,14 @@
         });
         $('vsRes').className = 'vsres ' + (cw >= ch ? 'side' : 'stack');
       }
-      $('overMsg').textContent = why;
+      $('overMsg').textContent = why + guestTail();
       $('stKills').textContent = k;
       $('stTime').textContent = fmtTime(t);
       $('stAcc').textContent = (sh ? Math.round(ht / sh * 100) : 0) + '%';
       elHud.hidden = true;
       elOver.hidden = false;
       if (netRole === 'host' && netPublic) {
-        $('overMsg').textContent = why + '  Next match in 10s.';
+        $('overMsg').textContent = why + '  Next match in 10s.' + guestTail();
         setTimeout(function () {
           if (tok === matchToken && state === 'over' && netRole === 'host' && netPublic) startMatch();
         }, 10000);
@@ -4073,7 +4127,7 @@
     } else if (mode === 'tut') {
       elAlive.textContent = Math.min(tut.i + 1, TUT.length) + '/' + TUT.length;
       elZone.className = 'zone-line';
-      elZone.textContent = 'ESC OR P TO LEAVE';
+      elZone.textContent = 'P TO LEAVE';
     } else if (mode === 'duel') {
       elAlive.textContent = score[player.team] + ' \u2013 ' + score[1 - player.team];
       elZone.className = 'zone-line';
@@ -4770,10 +4824,8 @@
     // The world map keeps its dirt; everywhere else takes the pack's tiles.
     var grassy = (mapKind === 'world' && mode !== 'duel');
     var packed = PACK_READY && PACK && !grassy;
-    if (packed) {
-      tilePass(r0, r1, t0, t1, true, false, 0, CG_MODE ? '#131c26' : '#0b1016');
-      tilePass(r0, r1, t0, t1, true, true, 0, CG_MODE ? '#202d3c' : '#141d27');
-    } else if (grassy) {
+    if (packed) drawMemory(r0, r1, t0, t1);
+    else if (grassy) {
       tilePass(r0, r1, t0, t1, true, false, 0, groundDim);
       tilePass(r0, r1, t0, t1, true, true, 1, '#221e18');
       tilePass(r0, r1, t0, t1, true, true, 2, '#121806');
@@ -4808,6 +4860,7 @@
     if (packed) {
       tilePass(r0, r1, t0, t1, false, false, 0, floorPat || '#24313f');
       tilePass(r0, r1, t0, t1, false, true, 0, PACK.navy);
+      tilePass(r0, r1, t0, t1, false, true, 0, hatch());
     } else if (grassy) {
       tilePass(r0, r1, t0, t1, false, false, 0, groundLit);
       tilePass(r0, r1, t0, t1, false, true, 1, '#6a6053');
@@ -4953,7 +5006,7 @@
     var g = ctx.createRadialGradient(player.x, player.y, VR * 0.18, player.x, player.y, VR);
     g.addColorStop(0, 'rgba(4,6,10,0)');
     g.addColorStop(0.62, 'rgba(4,6,10,.28)');
-    g.addColorStop(1, CG_MODE ? 'rgba(4,6,10,.74)' : 'rgba(4,6,10,.93)');
+    g.addColorStop(1, 'rgba(4,6,10,.74)');
     ctx.fillStyle = g;
     ctx.fillRect(player.x - VR, player.y - VR, VR * 2, VR * 2);
 
@@ -5089,6 +5142,7 @@
     renderDropHint();
     renderHostHold();
     renderAllies();
+    renderOwnName();
     renderPings();
     renderObjectives();
     if (player.mapOpen && !noOverlay) drawBigMap();
@@ -5129,6 +5183,16 @@
       ctx.fillStyle = 'rgba(' + tint + ',' + (e === player ? '.40' : '.36') + ')';
       ctx.beginPath(); ctx.ellipse(e.x, e.y, e.r * 1.35, e.r * 1.35, 0, 0, 6.2832); ctx.fill();
       drawPacked(e);
+      var fl = e.hitAt ? (performance.now() - e.hitAt) / 140 : 1;
+      if (fl < 1) {
+        ctx.fillStyle = 'rgba(255,246,230,' + (0.55 * (1 - fl)).toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (1.2 + fl * 0.5), 0, 6.2832); ctx.fill();
+      }
+      if (e === player) {
+        ctx.strokeStyle = 'rgba(124,231,216,.75)';
+        ctx.lineWidth = 2 / zoom;
+        ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 1.75, 0, 6.2832); ctx.stroke();
+      }
       if (e.swingT > 0) {
         var sw2 = 1 - e.swingT / 0.18;
         ctx.strokeStyle = 'rgba(214,228,242,' + (0.75 * (1 - sw2)).toFixed(3) + ')';
@@ -5225,10 +5289,13 @@
     if (noOverlay) return;
     var on = usingPad(player);
     var hideC = splitOn ? usingPad(kbPlayer()) : on;
+    var drawC = !on && !splitOn && !touchMode && mouse.sx !== undefined;
+    hideC = hideC || drawC;
     if (cursorHidden !== hideC) {
       cursorHidden = hideC;
       canvas.style.cursor = hideC ? 'none' : 'crosshair';
     }
+    if (drawC) { drawCrosshair(mouse.sx - VX, mouse.sy - VY); return; }
     if (!on || !player.alive || player.down) return;
     var maxD = Math.min(cw, ch) * 0.5 / zoom;
     var cx3 = Math.cos(player.ang), cy3 = Math.sin(player.ang);
@@ -5252,6 +5319,39 @@
     ctx.strokeStyle = 'rgba(124,231,216,.32)';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(sx3, sy3, 7.5, 0, 6.2832); ctx.stroke();
+  }
+
+  function drawCrosshair(x, y) {
+    var hm = player.hmAt ? (performance.now() - player.hmAt) / (player.hmKill ? 420 : 220) : 1;
+    var w = curW(player), sl = curSlot(player);
+    var gap = 5 + (player.animFire > 0 ? 4 : 0), len = 6;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (var pass = 0; pass < 2; pass++) {
+      ctx.strokeStyle = pass ? (w && sl.ammo <= 0 ? '#ff4d8d' : '#e8f4f2') : 'rgba(4,6,10,.85)';
+      ctx.lineWidth = pass ? 2 : 4;
+      ctx.beginPath();
+      ctx.moveTo(x - gap - len, y); ctx.lineTo(x - gap, y);
+      ctx.moveTo(x + gap, y); ctx.lineTo(x + gap + len, y);
+      ctx.moveTo(x, y - gap - len); ctx.lineTo(x, y - gap);
+      ctx.moveTo(x, y + gap); ctx.lineTo(x, y + gap + len);
+      ctx.stroke();
+    }
+    if (hm < 1) {
+      var r1 = 7 + hm * 3, r2 = 14 + hm * 3;
+      ctx.globalAlpha = 1 - hm;
+      for (pass = 0; pass < 2; pass++) {
+        ctx.strokeStyle = pass ? (player.hmKill ? '#ff4d5e' : '#ffffff') : 'rgba(4,6,10,.85)';
+        ctx.lineWidth = pass ? 2.4 : 4.4;
+        ctx.beginPath();
+        for (var q = 0; q < 4; q++) {
+          var a = Math.PI / 4 + q * Math.PI / 2, c = Math.cos(a), d = Math.sin(a);
+          ctx.moveTo(x + c * r1, y + d * r1); ctx.lineTo(x + c * r2, y + d * r2);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   function renderPrompt() {
@@ -5287,6 +5387,20 @@
     ctx.fillStyle = tint;
     ctx.fillText(txt, x, y + 0.5);
   }
+  // Your name floats over you so you know who you are playing as. Enemies
+  // stay anonymous - a name would give away a player standing in the dark.
+  function renderOwnName() {
+    if (noOverlay || !player.alive || player.air === 'plane' || state !== 'play') return;
+    var nm = player.local ? playerName() : player.name;
+    if (!nm) return;
+    var sx = (player.x - cam.x) * zoom + cw / 2;
+    var sy = (player.y - cam.y) * zoom + ch / 2 - (player.r + 16) * zoom;
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 10px "IBM Plex Mono", monospace';
+    pill(nm, sx, sy, '#8ff0e4');
+    ctx.restore();
+  }
   function renderAllies() {
     if (noOverlay || !player.alive) return;
     var mates = [];
@@ -5318,6 +5432,14 @@
       var d = Math.round(dist(t, player));
       sx = clamp(sx, pad, cw - pad);
       sy = clamp(sy, pad, ch - pad);
+      if (off && !splitOn) {
+        // keep clear of the health and weapon blocks, and of the minimap
+        if (sx < cw * 0.3 || sx > cw * 0.7) sy = Math.min(sy, ch - 150 * uiS);
+        if (SET.minimap) {
+          var mr = miniRect();
+          if (sx < mr.x + mr.S + 36 && sy > mr.y - 36 && sy < mr.y + mr.S + 44) sy = mr.top ? mr.y + mr.S + 44 : mr.y - 36;
+        }
+      }
       ctx.fillStyle = tint;
       ctx.strokeStyle = '#0d0f12';
       var pulse = 1 + Math.sin(performance.now() / 260 + m) * 0.12;
@@ -5636,7 +5758,7 @@
     if (!player.alive || !player.air) return;
     var txt, sub2 = null;
     if (player.air === 'plane') {
-      var left = Math.max(0, plane.dur * 0.93 - plane.t);
+      var left = Math.max(0, dropDeadline() - plane.t);
       if (jumpOpen()) {
         txt = promptKey('SPACE', 'A') + '  JUMP';
         sub2 = 'THE PLANE DROPS EVERYONE IN ' + Math.ceil(left) + 's';
@@ -5794,9 +5916,16 @@
   }
 
   var mapRect = null;
+  // On short screens the minimap moves up to the top-left corner, so it
+  // does not stack on the health block.
+  function miniRect() {
+    var S = Math.round(Math.min(148 * uiS, Math.min(cw, ch) * (ch < 600 ? 0.25 : 0.30)));
+    if (ch < 600 && !splitOn) return { x: 16, y: mode === 'tut' ? 60 : 16, S: S, top: true };
+    return { x: 16, y: Math.max(60, ch - S - (splitOn ? 78 : 158 * uiS)), S: S, top: false };
+  }
   function drawMinimap() {
-    var S = Math.round(Math.min(148, Math.min(cw, ch) * 0.30));
-    drawMapInto(16, Math.max(60, ch - S - (splitOn ? 78 : 158)), S, false);
+    var r = miniRect();
+    drawMapInto(r.x, r.y, r.S, false);
   }
   // The whole map, for reading the ground and dropping a mark on it.
   function drawBigMap() {
@@ -6378,7 +6507,7 @@
       var kp = kbPlayer();
       if (!kp.alive && kp.spec && (k === 'a' || k === 'd')) { specCycle(kp, k === 'a' ? -1 : 1); return; }
       if (kp.air === 'plane' && (k === 'e' || k === ' ')) kp.jumpReq = true;
-      if (kp.air) { if (k === 'escape') pause(); return; }
+      if (kp.air) { if (k === 'escape' || k === 'p') pause(); return; }
       if (k === 'r') startReload(kp);
       else if (k === 'e') playerPickup(kp);
       else if (k === 'q') swapSlot(undefined, kp);
@@ -6464,10 +6593,22 @@
     }
     if (blackout) t += '  \u2014  BLACKOUT: your eyes reach barely past your own feet. Sound tells you roughly where someone is; the flash of their gun is the only thing that tells you exactly.';
     $('modeDesc').textContent = t;
+    var sum = [MODE_LABEL[mode]];
+    if (mode !== 'duel') sum.push(mapKind === 'world' ? 'World' : 'CQB');
+    if (!MODES[mode].teams) sum.push(squad > 1 ? 'Duos' : 'Solo');
+    if (blackout) sum.push('Blackout');
+    $('modeSum').textContent = sum.join(' \u00b7 ');
     if (netRole === 'guest') { $('startBtn').textContent = 'WAITING FOR HOST'; return; }
-    $('startBtn').textContent = mode === 'br' ? 'DROP IN'
-      : (mode === 'duel' ? 'FIGHT' : (mode === 'gun' ? 'START LADDER' : 'DEPLOY'));
+    $('startBtn').textContent = 'PLAY';
   }
+  // the match options fold away so PLAY is the first thing on the menu
+  $('optBtn').addEventListener('click', function () {
+    var box = $('opts'), open = box.hidden;
+    box.hidden = !open;
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('optPlay').addEventListener('click', function () { $('startBtn').click(); });
   $('squadRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
     if (!b) return;
@@ -6542,6 +6683,9 @@
     var a = $('menuCoins'), b = $('coinsN');
     if (a) a.textContent = WALLET.coins;
     if (b) b.textContent = WALLET.coins;
+    // the moment a guest has something to lose, say so on the menu
+    var gh = $('guestHint');
+    if (gh) gh.hidden = !(isGuest() && WALLET.coins);
   }
 
   // The shop previews each skin by composing it exactly as the game would.
@@ -6671,11 +6815,33 @@
     mode = 'tut'; tutRestore = was;
   });
   var tutRestore = null;
+  // ---- CrazyGames midgame ads: only between matches, after one has been
+  // played, at most every three minutes, and never with friends waiting online.
+  var AD_GAP = 180000, adLast = Date.now(), adBusy = false, matchesPlayed = 0;
+  function withBreakAd(go) {
+    if (adBusy) return;
+    var due = CG && CG.ad && matchesPlayed > 0 && !netRole && Date.now() - adLast >= AD_GAP;
+    if (!due) { go(); return; }
+    adBusy = true; adLast = Date.now();
+    var done = false;
+    function after() {
+      if (done) return; done = true;
+      adBusy = false; holdSound('ad', false);
+      go();
+    }
+    try {
+      CG.ad.requestAd('midgame', {
+        adStarted: function () { cgGame('gameplayStop'); holdSound('ad', true); },
+        adFinished: after,
+        adError: after
+      });
+    } catch (err) { after(); }
+  }
   $('startBtn').addEventListener('click', function () {
     if (netRole === 'guest') { openOnline(); return; }         // the host starts
-    startMatch();
+    withBreakAd(startMatch);
   });
-  $('againBtn').addEventListener('click', function () { elOver.hidden = true; startMatch(); });
+  $('againBtn').addEventListener('click', function () { elOver.hidden = true; withBreakAd(startMatch); });
   $('homeBtn').addEventListener('click', function () {
     if (netRole === 'host' && netPublic) hostEndMatch('The host left.');
     goHome();
@@ -7050,7 +7216,7 @@
 
   // who is in the party, for everyone's screen
   function partyNames() {
-    var n = [acctName || 'HOST'];
+    var n = [playerName()];
     for (var i = 0; i < netGuests.length; i++) if (netGuests[i].party) n.push(netGuests[i].name);
     return n;
   }
@@ -7124,7 +7290,7 @@
   function sendPartyChat(text) {
     text = String(text || '').trim();
     if (!text || !netRole) return;
-    if (netRole === 'host') partySay(acctName || 'HOST', text);
+    if (netRole === 'host') partySay(playerName(), text);
     else netSend({ t: 'pchat', text: text.slice(0, 120) });
   }
   function cleanText(t) {
@@ -7165,7 +7331,7 @@
         conn.on('open', function () {
           opened = true;
           netRole = 'guest'; netCode = code;
-          netSend({ t: 'hi', skin: WALLET.skin, name: acctName || 'PLAYER', uid: acctUid(), pub: !!pub });
+          netSend({ t: 'hi', skin: WALLET.skin, name: playerName(), uid: acctUid(), pub: !!pub });
           netStatus(pub ? 'Joining a match...' : 'Connected! Waiting for the host to start a match.');
           syncMenu();
           cgRoom();
@@ -7247,7 +7413,7 @@
       $('placeN').textContent = m.big;
       $('placeN').className = m.won ? 'win' : '';
       $('placeL').textContent = m.small || '';
-      $('overMsg').textContent = m.msg + '  +' + earned + ' credits.';
+      $('overMsg').textContent = m.msg + '  +' + earned + ' credits.' + guestTail();
       $('stKills').textContent = m.kills || 0;
       $('stTime').textContent = fmtTime(m.time || 0);
       $('stAcc').textContent = '--';
@@ -7550,7 +7716,6 @@
     acctName = 'GUEST' + (1000 + rnd(9000));
     $('acctBtn').hidden = true;
     $('friendsBtn').hidden = true;
-    if ($('bloodRow')) $('bloodRow').hidden = true;
     $('acctName').textContent = acctName;
     var sdk = window.CrazyGames && window.CrazyGames.SDK;
     if (!sdk) { cgLand(); return; }                        // blocked (ad blocker): play on regardless
@@ -7716,7 +7881,9 @@
       if (typeof p.coins === 'number') {
         var owned = (p.owned || []).slice();
         WALLET.owned.forEach(function (k) { if (owned.indexOf(k) < 0) owned.push(k); });
-        WALLET = { coins: p.coins, owned: owned.length ? owned : WALLET.owned, skin: (p.skin | 0) };
+        // whatever this guest earned before signing in comes with them
+        WALLET = { coins: p.coins + guestEarned, owned: owned.length ? owned : WALLET.owned, skin: (p.skin | 0) };
+        guestEarned = 0;
         if (WALLET.owned.indexOf(WALLET.skin) < 0) WALLET.skin = WALLET.owned[0];
         try { localStorage.setItem('earshot.wallet', JSON.stringify(WALLET)); } catch (err) {}
         refreshCoins();
@@ -7747,18 +7914,45 @@
 
   function renderAcct() {
     var on = !!(fbUser && acctName);
-    $('acctName').textContent = on ? acctName : 'NOT LOGGED IN';
+    $('acctName').textContent = on ? acctName : (guestName ? guestName + '  \u00b7  GUEST' : 'NOT LOGGED IN');
     $('acctBtn').textContent = on ? 'LOG OUT' : 'LOG IN';
+    var gh = $('guestHint');
+    if (gh) gh.hidden = on || !WALLET.coins;
     $('friendsBox').hidden = !on;
     $('friendsNeed').hidden = on;
   }
+  // One box, one button. Nothing stands between a new player and a match.
+  function openNameGate(msg) {
+    ['menu', 'online', 'friends', 'account', 'shop', 'settings'].forEach(function (id) { if ($(id)) $(id).hidden = true; });
+    $('namegate').hidden = false;
+    $('nameStatus').textContent = msg || '';
+    $('guestUser').value = guestName || '';
+    setTimeout(function () { try { $('guestUser').focus(); } catch (err) {} }, 30);
+  }
+  function closeNameGate() { $('namegate').hidden = true; elMenu.hidden = false; syncMenu(); renderAcct(); }
+  function takeName() {
+    if (!setGuestName($('guestUser').value)) { $('nameStatus').textContent = 'Two letters or more, letters and numbers.'; return false; }
+    closeNameGate();
+    return true;
+  }
+  $('namePlay').addEventListener('click', takeName);
+  $('guestUser').addEventListener('keydown', function (ev) {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') takeName();
+  });
+  $('nameLogin').addEventListener('click', function () { $('namegate').hidden = true; openAccount(''); });
+
   function openAccount(msg) {
     ['menu', 'online', 'friends'].forEach(function (id) { $(id).hidden = true; });
     $('account').hidden = false;
     acctStatus(msg || '');
     loadFirebase(function () {});
   }
-  function closeAccount() { $('account').hidden = true; elMenu.hidden = false; syncMenu(); }
+  function closeAccount() {
+    $('account').hidden = true;
+    if (needName()) { openNameGate(''); return; }      // still nameless: back to the name
+    elMenu.hidden = false; syncMenu();
+  }
 
   // ---- friends ----
   function addFriend() {
@@ -8009,7 +8203,8 @@
     }, 400);
   }
   function quickPlay() {
-    if (CG_MODE && !fbUser) {
+    if (needName()) { openNameGate('Pick a name to play online.'); return; }
+    if (!fbUser) {
       openOnline();
       quickStatus('Connecting...');
       loadFirebase(function () {
@@ -8019,7 +8214,6 @@
       });
       return;
     }
-    if (!CG_MODE && (!fbUser || !acctName)) { openAccount('Log in to play online.'); return; }
     if (netRole === 'guest') { openOnline(); netStatus('You are in a party - the leader starts the match.'); return; }
     initAudio();
     if (netRole === 'host' && netGuests.length) { goPublicHost(); return; }
@@ -8076,7 +8270,7 @@
     if (queueOn) return humansIn() < queueCap();
     if (state !== 'play' && state !== 'paused') return false;
     if (humansIn() >= Math.min(NET_MAX, fieldN)) return false;
-    if (mode === 'br') return !!plane && plane.t < plane.dur * 0.75;   // only while there are seats on the plane
+    if (mode === 'br') return !!plane && plane.t < dropDeadline() - 1;   // only while there are seats on the plane
     return true;
   }
   function lobbyWrite() {
@@ -8143,13 +8337,24 @@
     requestAnimationFrame(frame);
   }
 
+  // a guest closing the tab would lose what they earned: say so first
+  window.addEventListener('beforeunload', function (ev) {
+    if (CG_MODE || !isGuest() || !WALLET.coins) return;
+    ev.preventDefault();
+    ev.returnValue = '';
+    return '';
+  });
+
   resize();
   buildTextures();
+  loadName();
   loadWallet();
   loadSettings();
   refreshCoins();
   syncMenu();
   syncTutBtn();
+  renderAcct();                       // show the name we came in with
   cgInit();
+  if (!CG_MODE && needName()) openNameGate('');
   requestAnimationFrame(frame);
 })();

@@ -5,16 +5,24 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="description" content="Dead Angle - a top-down shooter where sound gives you away.">
 <title>Dead Angle</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Russo+One&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%275%27 fill=%27%230d0f12%27/%3E%3Cpath d=%27M6 26 L16 6 L26 26 Z%27 fill=%27none%27 stroke=%27%23f2bd1d%27 stroke-width=%274%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E">
+<style>
+/* fonts ship with the game (SIL Open Font License, see assets/fonts) */
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:500;font-display:swap;src:url(assets/fonts/chakrapetch-500.woff2) format('woff2')}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/chakrapetch-600.woff2) format('woff2')}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:700;font-display:swap;src:url(assets/fonts/chakrapetch-700.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/ibmplexmono-400.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;src:url(assets/fonts/ibmplexmono-500.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:600;font-display:swap;src:url(assets/fonts/ibmplexmono-600.woff2) format('woff2')}
+@font-face{font-family:'Russo One';font-style:normal;font-weight:400;font-display:swap;src:url(assets/fonts/russoone-400.woff2) format('woff2')}
+</style>
 <style>
 :root{
   --void:#04060a;
   --ink:#0a0f16;
   --slate:#18212e;
   --line:#2c3d52;
-  --dim:#5d7288;
+  --dim:#8296ab;
   --text:#c6d4e3;
   --cyan:#7ce7d8;
   --amber:#ffc95e;
@@ -59,6 +67,8 @@ body{margin:0;background:var(--void);color:var(--text);font-family:var(--font-d)
 .feed div.you{border-right-color:var(--cyan)}
 .feed div.you b{color:var(--cyan)}
 
+.hud-top,.feed,.hud-bot{zoom:var(--ui,1)}
+.hud.split .hud-top,.hud.split .feed{zoom:1}
 .hud.split .hud-bot{display:none}
 .hud.split .feed{top:58px}
 .hud-bot{position:absolute;left:calc(16px + env(safe-area-inset-left,0px));right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
@@ -167,6 +177,22 @@ h1 .gold{color:var(--gold)}
 .igchat{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);z-index:25;width:min(520px,calc(100% - 32px))}
 .igchat input{width:100%;padding:10px 12px;font-family:var(--font-m);font-size:13px;background:rgba(241,231,208,.95);color:var(--out);border:3px solid var(--out);border-radius:4px}
 .ptitle{margin:0;font-family:var(--font-x);font-weight:400;font-size:clamp(32px,8.5vw,50px);letter-spacing:.14em;text-indent:.14em;line-height:1;color:var(--paper);-webkit-text-stroke:2px var(--out);paint-order:stroke fill;text-shadow:4px 4px 0 var(--out)}
+.playbox{display:flex;flex-direction:column;align-items:center;gap:12px}
+.go.big{font-size:30px;padding:18px 78px;letter-spacing:.24em;text-indent:.24em}
+.modesum{font-family:var(--font-m);font-size:11px;letter-spacing:.26em;color:var(--khaki);text-transform:uppercase}
+.mbtns{display:flex;flex-wrap:wrap;justify-content:center;gap:12px 10px;max-width:640px}
+.mbtns .go.ghost{font-size:11.5px;padding:9px 18px}
+#optBtn[aria-expanded="true"]{background:var(--gold);color:var(--out)}
+.opts{display:flex;flex-direction:column;align-items:center;gap:22px;width:100%}
+.opts[hidden]{display:none}
+@media (max-height:560px){
+  .panel{gap:14px}
+  h1{font-size:44px}
+  .brand{gap:8px}
+  .go.big{font-size:24px;padding:13px 60px}
+  .playbox{gap:8px}
+  .mbtns{gap:9px 8px}
+}
 .pbtns{display:flex;flex-direction:column;align-items:center;gap:16px}
 .setlist{width:100%;max-width:440px;display:flex;flex-direction:column;gap:2px;background:var(--out);border:3px solid var(--out);box-shadow:4px 4px 0 rgba(0,0,0,.45)}
 .setrow{background:var(--navy);padding:11px 14px;display:flex;align-items:center;gap:12px;font-family:var(--font-m);font-size:10.5px;letter-spacing:.14em;color:#d3c9b2}
@@ -254,23 +280,28 @@ h1 .gold{color:var(--gold)}
   <div class="screen" id="menu">
     <div class="panel">
       <div class="acct"><span id="acctName">NOT LOGGED IN</span><button class="tgl" id="acctBtn" type="button">LOG IN</button></div>
+      <p class="modedesc" id="guestHint" hidden>Sign in before you leave to keep your credits.</p>
       <div class="brand">
         <h1>DEAD <span class="gold">ANGLE</span></h1>
         <div class="rule"></div>
       </div>
 
-      <div class="legend">
-        <div class="hd">WEAPON NOISE &mdash; HOW FAR EACH SHOT CARRIES</div>
-        <div><s style="color:#ffc95e"><i></i>PISTOL</s><u>900 u</u></div>
-        <div><s style="color:#ff7a4d"><i></i>SHOTGUN</s><u>1700 u</u></div>
-        <div><s style="color:#fff5cd"><i></i>SNIPER</s><u>2000 u</u></div>
-        <div><s style="color:#9db0c4"><i></i>RIFLE</s><u>540 u</u></div>
-        <div><s style="color:#5d7288"><i></i>RELOAD</s><u>340 u</u></div>
-        <div class="hd">YOUR OWN FOOTSTEPS</div>
-        <div><s style="color:#ff7a4d"><i></i>SPRINTING</s><u>520 u</u></div>
-        <div><s style="color:#7ce7d8"><i></i>WALKING</s><u>260 u</u></div>
+
+      <div class="playbox">
+        <button class="go big" id="startBtn" type="button">PLAY</button>
+        <div class="modesum" id="modeSum">BATTLE ROYALE &middot; CQB &middot; SOLO</div>
+      </div>
+      <div class="mbtns">
+        <button class="go ghost" id="optBtn" type="button" aria-expanded="false">MATCH OPTIONS</button>
+        <button class="go ghost" id="quickBtn" type="button">QUICK PLAY ONLINE</button>
+        <button class="go ghost" id="onlineBtn" type="button">PARTY</button>
+        <button class="go ghost" id="friendsBtn" type="button">FRIENDS</button>
+        <button class="go ghost" id="shopBtn" type="button">SKINS &middot; <span id="menuCoins">0</span> CR</button>
+        <button class="go ghost" id="setBtn" type="button">SETTINGS</button>
+        <button class="go ghost" id="tutBtn" type="button">TUTORIAL</button>
       </div>
 
+      <div class="opts" id="opts" hidden>
       <div class="picks">
         <div class="pick">
           <p>MODE</p>
@@ -337,14 +368,18 @@ h1 .gold{color:var(--gold)}
         <span><kbd>P</kbd> pause</span>
         <span><kbd>SHIFT</kbd> sprint &mdash; loud</span>
       </div>
-      <div class="pbtns">
-        <button class="go" id="startBtn" type="button">DROP IN</button>
-        <button class="go" id="tutBtn" type="button">TUTORIAL</button>
-        <button class="go" id="quickBtn" type="button">QUICK PLAY ONLINE</button>
-        <button class="go ghost" id="onlineBtn" type="button">PARTY</button>
-        <button class="go ghost" id="friendsBtn" type="button">FRIENDS</button>
-        <button class="go ghost" id="shopBtn" type="button">SKINS &middot; <span id="menuCoins">0</span> CR</button>
-        <button class="go ghost" id="setBtn" type="button">SETTINGS</button>
+      <div class="legend">
+        <div class="hd">WEAPON NOISE &mdash; HOW FAR EACH SHOT CARRIES</div>
+        <div><s style="color:#ffc95e"><i></i>PISTOL</s><u>900 u</u></div>
+        <div><s style="color:#ff7a4d"><i></i>SHOTGUN</s><u>1700 u</u></div>
+        <div><s style="color:#fff5cd"><i></i>SNIPER</s><u>2000 u</u></div>
+        <div><s style="color:#9db0c4"><i></i>RIFLE</s><u>540 u</u></div>
+        <div><s style="color:#5d7288"><i></i>RELOAD</s><u>340 u</u></div>
+        <div class="hd">YOUR OWN FOOTSTEPS</div>
+        <div><s style="color:#ff7a4d"><i></i>SPRINTING</s><u>520 u</u></div>
+        <div><s style="color:#7ce7d8"><i></i>WALKING</s><u>260 u</u></div>
+      </div>
+        <button class="go" id="optPlay" type="button">PLAY</button>
       </div>
     </div>
   </div>
@@ -458,6 +493,25 @@ h1 .gold{color:var(--gold)}
     </div>
   </div>
 
+  <div class="screen" id="namegate" hidden>
+    <div class="panel">
+      <div class="brand">
+        <h1>DEAD <span class="gold">ANGLE</span></h1>
+        <div class="rule"></div>
+        <div class="tag">pick a name to play under</div>
+      </div>
+      <div class="acctform">
+        <input class="wide" id="guestUser" maxlength="16" placeholder="USERNAME" spellcheck="false" aria-label="Username">
+      </div>
+      <p class="modedesc" id="nameStatus"></p>
+      <div class="pbtns">
+        <button class="go" id="namePlay" type="button">PLAY</button>
+        <button class="go ghost" id="nameLogin" type="button">I HAVE AN ACCOUNT</button>
+      </div>
+      <p class="modedesc">No account needed. Credits you earn as a guest are only kept if you sign in before you leave.</p>
+    </div>
+  </div>
+
   <div class="screen" id="account" hidden>
     <div class="panel">
       <div class="brand">
@@ -562,7 +616,7 @@ h1 .gold{color:var(--gold)}
         <button class="go ghost" id="pauseSetBtn" type="button">SETTINGS</button>
         <button class="go ghost" id="leaveBtn" type="button">LEAVE MATCH</button>
       </div>
-      <p class="modedesc">Esc resumes. Leaving abandons the match and returns to the menu.</p>
+      <p class="modedesc">P resumes. Leaving abandons the match and returns to the menu.</p>
     </div>
   </div>
 </div>

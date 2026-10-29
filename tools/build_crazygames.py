@@ -29,6 +29,9 @@ if os.path.isdir(OUT):
 os.makedirs(os.path.join(OUT, 'assets'))
 io.open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8', newline='').write(html)
 shutil.copy2(os.path.join(ROOT, 'game.js'), os.path.join(OUT, 'game.js'))
+# the fonts ship whole, with their licences
+shutil.copytree(os.path.join(ROOT, 'assets', 'fonts'), os.path.join(OUT, 'assets', 'fonts'))
+used = [u for u in used if not u.startswith('assets/fonts/')]
 for rel in used:
     src = os.path.join(ROOT, rel)
     if not os.path.isfile(src):
@@ -44,5 +47,5 @@ with zipfile.ZipFile(ZIP, 'w', zipfile.ZIP_DEFLATED) as z:
             z.write(full, os.path.relpath(full, OUT).replace('\\', '/'))
 
 total = sum(os.path.getsize(os.path.join(b, f)) for b, d, fs in os.walk(OUT) for f in fs)
-print('files:', 2 + len(used), '| unpacked %.1f MB | zip %.1f MB' % (total / 1e6, os.path.getsize(ZIP) / 1e6))
+print('files:', sum(len(fs) for b, d, fs in os.walk(OUT)), '| unpacked %.1f MB | zip %.1f MB' % (total / 1e6, os.path.getsize(ZIP) / 1e6))
 print('zip:', ZIP)
