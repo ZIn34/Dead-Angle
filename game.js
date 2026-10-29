@@ -6612,12 +6612,6 @@
     $('startBtn').textContent = 'PLAY';
   }
   // the match options fold away so PLAY is the first thing on the menu
-  $('optBtn').addEventListener('click', function () {
-    var box = $('opts'), open = box.hidden;
-    box.hidden = !open;
-    this.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
   $('optPlay').addEventListener('click', function () { $('startBtn').click(); });
   $('squadRow').addEventListener('click', function (ev) {
     var b = ev.target.closest('button');
@@ -7704,9 +7698,8 @@
     showIf('netCodeBox', netView === 'host' && hosting && !!netCode);
     showIf('joinLabel', netView === 'join' && !joined);
     showIf('joinRow', netView === 'join' && !joined);
-    showIf('netLeave', !!netRole);
+    showIf('netLeave', !!netRole && !quick);     // BACK is the way out of waiting
     showIf('netStatus', !quick);
-    $('netLeave').textContent = quick ? 'STOP LOOKING' : 'LEAVE ROOM';
   }
   function openOnline(view) {
     if (view) netView = view;
@@ -7730,7 +7723,8 @@
     if (ev.key === 'Enter') joinGame(this.value);
   });
   $('netBack').addEventListener('click', function () {
-    quickStand(); $('online').hidden = true; elMenu.hidden = false; syncMenu(); });
+    quickStand();
+    if (netView === 'quick' && netRole) netClose(''); $('online').hidden = true; elMenu.hidden = false; syncMenu(); });
   $('netLeave').addEventListener('click', function () { netClose('Disconnected.'); });
 
   // ---------------------------------------------------------------- crazygames
