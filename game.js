@@ -1437,7 +1437,7 @@
   // The drop plane: a straight run across the map. Everyone rides it at the
   // start of a battle royale and bails out somewhere along the way.
   var plane = null;
-  var PLANE_SPEED = 360, GLIDE_SPEED = 235, CHUTE_TIME = 3.2;
+  var PLANE_SPEED = 720, GLIDE_SPEED = 235, CHUTE_TIME = 3.2;
   var VX = 0, VY = 0, VW = 0, VH = 0;       // the viewport being drawn into
   // two people on one screen, on opposite sides
   function splitVs() { return splitOn && locals.length > 1 && locals[0].team !== locals[1].team; }
@@ -1701,6 +1701,7 @@
     for (var i = 0; i < loot.length; i++) {
       var it = loot[i];
       if (it.type !== type) continue;
+      if (e.lootBad && e.lootBad.indexOf(it) >= 0) continue;   // could not get to that one
       var dx = it.x - e.x, dy = it.y - e.y, d2 = dx * dx + dy * dy;
       if (d2 < bestD) { bestD = d2; best = it; }
     }
@@ -1841,8 +1842,7 @@
       e.slots = [{ key: 'rifle', ammo: WEAPONS.rifle.mag }, { key: 'pistol', ammo: WEAPONS.pistol.mag }];
       e.slot = 0; e.reserve = 120; e.meds = 1; e.nades = 2; e.smokes = 1;
     } else {
-      // battle royale: everyone lands with a pistol, so the first fight comes quickly
-      e.slots = [{ key: 'pistol', ammo: WEAPONS.pistol.mag }, null]; e.slot = 0; e.reserve = START_RESERVE; e.meds = 0; e.nades = 0; e.smokes = 0;
+      e.slots = [null, null]; e.slot = 0; e.reserve = START_RESERVE; e.meds = 0; e.nades = 0; e.smokes = 0;
     }
   }
   function placeEnt(e, tile) {
@@ -2052,9 +2052,31 @@
         // all landing along the one stretch of flight path - spread out, the
         // first fights come one at a time instead of all at once.
         if (mode === 'br') {
-          var la = Math.random() * Math.PI * 2, lr = Math.sqrt(Math.random()) * zone.r * 0.8;
-          e.landX = clamp(zone.cx + Math.cos(la) * lr, TILE * 3, WORLD_W - TILE * 3);
-          e.landY = clamp(zone.cy + Math.sin(la) * lr, TILE * 3, WORLD_H - TILE * 3);
+          var mate = null, lq, lm;
+          for (lq = 0; squad > 1 && lq < ents.length; lq++) {
+            lm = ents[lq];
+            if (lm !== e && lm.team === e.team && lm.alive && lm.air === 'chute' && lm.landX !== undefined) mate = lm;
+          }
+          if (mate) {                                  // a squad still lands together
+            e.landX = clamp(mate.landX + rr(-60, 60), TILE * 3, WORLD_W - TILE * 3);
+            e.landY = clamp(mate.landY + rr(-60, 60), TILE * 3, WORLD_H - TILE * 3);
+          } else {
+            // of several random spots, take the one furthest from everyone else's
+            var lbest = -1;
+            for (var lc = 0; lc < 14; lc++) {
+              var la = Math.random() * Math.PI * 2, lr = Math.sqrt(Math.random()) * zone.r * 0.8;
+              var lx = clamp(zone.cx + Math.cos(la) * lr, TILE * 3, WORLD_W - TILE * 3);
+              var ly = clamp(zone.cy + Math.sin(la) * lr, TILE * 3, WORLD_H - TILE * 3);
+              var lnear = 1e9;
+              for (lq = 0; lq < ents.length; lq++) {
+                lm = ents[lq];
+                if (lm === e || !lm.alive || lm.air === 'plane') continue;
+                var lox = lm.air === 'chute' && lm.bot ? lm.landX : lm.x, loy = lm.air === 'chute' && lm.bot ? lm.landY : lm.y;
+                lnear = Math.min(lnear, Math.sqrt((lx - lox) * (lx - lox) + (ly - loy) * (ly - loy)));
+              }
+              if (lnear > lbest) { lbest = lnear; e.landX = lx; e.landY = ly; }
+            }
+          }
         }
         // pull the spot inside the circle (with room to spare)
         var lzx = e.landX - zone.cx, lzy = e.landY - zone.cy, lzd = Math.sqrt(lzx * lzx + lzy * lzy) || 1;
@@ -2138,8 +2160,8 @@
   // Your own hands in the air: jump from the plane, then steer the chute.
   // the door opens a few seconds in, once the plane is over the island
   var JUMP_AFTER = 2;
-  // everyone still aboard is tipped out a few seconds after the door opens
-  function dropDeadline() { return Math.min(plane.dur * 0.93, JUMP_AFTER + 5); }
+  // everyone still aboard is tipped out just before the plane leaves the map
+  function dropDeadline() { return plane.dur * 0.93; }
   function jumpOpen() { return !!plane && plane.t >= JUMP_AFTER && !!plane.overLand; }
   function airControl(e, I, dt) {
     if (e.air === 'plane') {
@@ -3251,15 +3273,29 @@
         }
         if (d >= reach2 || !sightClear(e.x, e.y, o.x, o.y)) continue;
         if (o !== e.target && !inCone(e, o.x, o.y, FOV_HALF + 0.15)) continue;
-        if (mode === 'br' && o !== e.target) {
+        // ...but nobody shares a room politely. Later on, this close is always a
+        // fight; in the first circle, only if they are right on top of you.
+        if (mode === 'br' && o !== e.target && d >= (zone && zone.phase === 0 && !o.local ? 70 : 170)) {
           if ((e.skip[o.id] || 0) > matchTime) continue;          // already let them go
           if (e.skip[o.id] === undefined || e.skip[o.id] <= matchTime) {
             // early on most people avoid a fight; later it is kill or be killed.
             // Through the whole first circle, bots mostly leave other bots be
             // (a person is still fair game, so you get your fights).
             var calm = zone && zone.phase === 0 && !o.local;
-            var takeIt = Math.random() < (calm ? 0.1 : (matchTime < 75 ? 0.3 : 0.62));
-            if (!takeIt) { e.skip[o.id] = matchTime + (calm ? rr(10, 18) : rr(4, 8)); continue; }
+            var takeIt = Math.random() < (calm ? 0.05 : (matchTime < 75 ? 0.3 : 0.62));
+            if (!takeIt) {
+              e.skip[o.id] = matchTime + (calm ? rr(10, 18) : rr(4, 8));
+              // letting them go means moving on, not standing there together
+              if (calm && d < 340) {
+                var ml = 0, mv = null;
+                for (var mt = 0; mt < 6; mt++) {
+                  var mc = floorTiles[rnd(floorTiles.length)], mdd = Math.abs(mc.x * TILE - o.x) + Math.abs(mc.y * TILE - o.y);
+                  if (Math.abs(mc.x * TILE - e.x) + Math.abs(mc.y * TILE - e.y) < 1100 && mdd > ml) { ml = mdd; mv = mc; }
+                }
+                if (mv) { pathTo(e, mv.x * TILE, mv.y * TILE, 3.5); }
+              }
+              continue;
+            }
             e.skip[o.id] = -1;                                    // decided: fight
           }
         }
@@ -3415,6 +3451,13 @@
         else { var rt = floorTiles[rnd(floorTiles.length)]; pathTo(e, rt.x * TILE, rt.y * TILE, 3.0); }
       }
       if (followPath(e, dt, speed)) footstep(e, dt, false);
+      // not getting anywhere: give up on that item and go somewhere else
+      if (Math.abs(e.x - (e.dryX || 0)) + Math.abs(e.y - (e.dryY || 0)) > 14) { e.dryX = e.x; e.dryY = e.y; e.dryT = 0; }
+      else if ((e.dryT = (e.dryT || 0) + dt) > 1.5) {
+        e.dryT = 0;
+        if (e.lootGoal) (e.lootBad = e.lootBad || []).push(e.lootGoal);
+        e.lootGoal = null; e.repathT = 0;
+      }
     } else if (e.target && e.reactT <= 0 && mode !== 'br' && !sightClear(e.x, e.y, e.target.x, e.target.y)) {
       // They ducked behind something. Strafing on the spot never gets the
       // shot back - push to where they were last seen and take the corner.
@@ -4018,6 +4061,8 @@
           // Early on (the first circle) nearly all of them do: loot first, fight later.
           var early = mode === 'br' && zone && zone.phase === 0;
           var shrug = mode === 'br' && s.kind === 'shot' && d > (early ? 260 : 450) && Math.random() < (early ? 0.95 : 0.68);
+          // and another bot's footsteps are not worth chasing yet
+          if (early && s.kind !== 'shot' && d > 140 && ents[s.owner] && ents[s.owner].bot) shrug = true;
           if (!e.target && !shrug) {
             // sharper ears place the noise more precisely
             var err = 60 * (1.6 - ear);
