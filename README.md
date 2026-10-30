@@ -45,7 +45,7 @@ keyboard and controller labels on their own.
 ## Modes
 
 - **Battle royale** — 26 players, loot from nothing, closing zone
-- **Teams 5v5** / **War 10v10** — shared loadouts, respawns, first to a score
+- **Teams 8v8** / **War 15v15** — shared loadouts, respawns, first to a score
 - **Capture the flag** — carrying the flag makes you ring out across the map
 - **Sectors** — three holds, every one you own pays a point a second
 - **Infection** — a horde that keeps coming; survive the clock

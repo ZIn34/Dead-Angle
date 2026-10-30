@@ -98,8 +98,8 @@
     zomb: 'A few turn at the start and more keep coming, faster as the clock runs down. The infected carry nothing and cannot shoot - they are faster than you, they find you without needing to see you, and a hit puts you on their side. Survive the clock and the living win; lose the last human and it is over.',
     sect: 'Three sectors, eight a side. Outnumber the other team inside one and it flips to you; every sector you hold pays a point a second, first to a hundred and fifty. Holding all three is loud, obvious work - they will hear exactly where you are.',
     ctf: 'Two flags, five a side, first to three captures. Your own flag has to be home for a capture to count. Carrying the enemy flag makes you ring out across the map every second - taking it is the easy part.',
-    war: 'Twenty fighters, ten a side, first to seventy-five. A big map and constant contact - you will rarely be more than a few seconds from a firefight, and the ring of a shot is the only warning you get.',
-    team: 'Five against five, everyone respawns, first side to thirty eliminations. Your squad wears cool colours and theirs wears warm - but in the dark you will hear them long before you can tell.'
+    war: 'Thirty fighters, fifteen a side, first to one hundred. A big map and constant contact - you will rarely be more than a few seconds from a firefight, and the ring of a shot is the only warning you get.',
+    team: 'Eight against eight, everyone respawns, first side to forty eliminations. Your squad wears cool colours and theirs wears warm - but in the dark you will hear them long before you can tell.'
   };
 
   // ---------------------------------------------------------------- dom
@@ -1476,6 +1476,7 @@
   var result = null, overCause = '';
   var lastWinner = null;              // who closed out a free-for-all
   var dmgMarks = [], shake = 0;
+  var countT = 0, COUNT_FROM = 3;     // the 3, 2, 1 before a match; nothing moves until it ends
   var cam = { x: 0, y: 0 };
   var mouse = { sx: 0, sy: 0, wx: 0, wy: 0, down: false };
   var keys = {};
@@ -1602,6 +1603,7 @@
     }
     standing.forEach(function (e) { e.tourBye = false; });
     tourSeed(standing);
+    countT = COUNT_FROM;                          // each round of the bracket is a match
   }
   function isZombie(e) { return !!(MODE.zombies && e.team === 1); }
   // Which of the two carried guns suits this range: shotguns fall off hard,
@@ -2006,6 +2008,7 @@
     $('online').hidden = true; $('account').hidden = true; $('friends').hidden = true;
     if ($('chat') && !$('chat').hidden) closeChat(), $('friends').hidden = true;
     state = 'play';
+    countT = mode === 'tut' ? 0 : COUNT_FROM;
     syncHud();
     cgGame('gameplayStart'); cgRoom();
     if (netRole === 'host') for (var gs = 0; gs < netGuests.length; gs++) if (netGuests[gs].ent) netSendTo(netGuests[gs], startMsg(netGuests[gs]));
@@ -5411,6 +5414,7 @@
     renderDowned();
     renderPrompt();
     renderDamage();
+    renderCountdown();
     if (touchMode && !splitOn) renderSticks();
   }
 
@@ -6378,6 +6382,27 @@
     return true;
   }
 
+  function renderCountdown() {
+    if (noOverlay || countT <= 0 || state === 'over') return;
+    var n = Math.ceil(countT), k = countT - Math.floor(countT);   // each number swells then settles
+    ctx.save();
+    ctx.fillStyle = 'rgba(4,6,10,.45)';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var S = Math.min(cw, ch);
+    ctx.font = '400 ' + Math.round(S * 0.28 * (0.9 + 0.25 * (k === 0 ? 1 : k))) + 'px "Russo One", "Chakra Petch", sans-serif';
+    ctx.lineWidth = Math.max(6, S * 0.012); ctx.strokeStyle = '#0d0f12'; ctx.lineJoin = 'round';
+    ctx.strokeText(String(n), cw / 2, ch * 0.46);
+    ctx.fillStyle = '#f2bd1d';
+    ctx.fillText(String(n), cw / 2, ch * 0.46);
+    ctx.font = '400 ' + Math.max(13, Math.round(S * 0.03)) + 'px "Russo One", "Chakra Petch", sans-serif';
+    ctx.fillStyle = '#f1e7d0';
+    ctx.lineWidth = 4;
+    ctx.strokeText('GET READY', cw / 2, ch * 0.66);
+    ctx.fillText('GET READY', cw / 2, ch * 0.66);
+    ctx.restore();
+  }
+
   function renderDamage() {
     if (noOverlay) return;
     if (player.alive && player.bleeding && !player.down) {
@@ -6778,6 +6803,11 @@
     kbmLast = performance.now();
     var k = keyOf(e);
     keys[k] = true;
+    // nothing happens during the countdown, except pausing
+    if (state === 'play' && countT > 0 && k !== 'p' && k !== 'escape') {
+      if (['w', 'a', 's', 'd', ' ', 'tab', 'arrowup', 'arrowdown'].indexOf(k) >= 0) e.preventDefault();
+      return;
+    }
     if (netRole && !cgNoChat() && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden && !(player && player.invOpen)) { e.preventDefault(); openIgChat(); return; }
     if (netGuest && state === 'play') {
       var GB = { 'e': PAD.pickup, ' ': PAD.jump, 'v': PAD.melee, 'x': PAD.giveup, 'r': PAD.reload, 'f': PAD.stim,
@@ -6827,7 +6857,7 @@
     if (state === 'play' && !netRole) pause();      // a friend online keeps playing
   });
 
-  var MODE_LABEL = { tut: 'Tutorial', br: 'Battle royale', duel: '1v1', gun: 'Gun game', team: 'Teams 5v5', war: 'War 10v10', ctf: 'Capture the flag', sect: 'Sector capture', zomb: 'Infection', tour: '1v1 tourney' };
+  var MODE_LABEL = { tut: 'Tutorial', br: 'Battle royale', duel: '1v1', gun: 'Gun game', team: 'Teams 8v8', war: 'War 15v15', ctf: 'Capture the flag', sect: 'Sector capture', zomb: 'Infection', tour: '1v1 tourney' };
   function pause() {
     cgGame('gameplayStop');
     if (netGuest) {                                   // the host's match keeps going
@@ -7458,7 +7488,7 @@
     netSendT = 1 / sendHz();
     // everything everyone sees, serialised once
     var shared = netStr({
-      t: 's', hold: state === 'paused',
+      t: 's', hold: state === 'paused', cd: +countT.toFixed(2),
       fl: flags.map(function (f) {
         return { team: f.team, hx: f.hx, hy: f.hy, x: f.x, y: f.y, home: f.home, ping: f.ping, carrier: f.carrier ? f.carrier.id : -1 };
       }),
@@ -7813,6 +7843,7 @@
     if (m.co) corpses = m.co.map(unpackMark);
     if (m.defs) for (var k in m.defs) netDefs[k] = m.defs[k];
     netHostHeld = !!m.hold;
+    if (m.cd !== undefined) countT = m.cd;
     var ev = m.ev || [];
     for (i = 0; i < ev.length; i++) {
       var q = ev[i];
@@ -8711,11 +8742,20 @@
 
   // ---------------------------------------------------------------- loop
   var last = performance.now();
+  function tickCountdown(dt) {
+    var was = Math.ceil(countT);
+    countT = Math.max(0, countT - dt);
+    if (player && Math.ceil(countT) !== was) audioEmit(player.x, player.y, PICK_SND, player.id);
+    // the camera still has to find you, and the mouse still aims
+    if (player) { cam.x = player.x; cam.y = player.y; }
+    updateMouseWorld();
+  }
   function frame(now) {
     var dt = Math.min((now - last) / 1000, 0.05);
     last = now;
     if (state === 'play') {
-      if (netGuest) guestTick(Math.max(dt, 0.0001));
+      if (netGuest) { guestTick(Math.max(dt, 0.0001)); if (countT > 0) countT = Math.max(0, countT - dt); }
+      else if (countT > 0) tickCountdown(dt);
       else update(Math.max(dt, 0.0001));
       if (netGuest && netGuestPaused) uiPad(dt);
     }
