@@ -2877,9 +2877,16 @@
   }
 
   var SNIPER_BLEED = { rate: 2, total: 30 };   // a sniper wound kills if left alone
+  // Battle royale among bots: how calm things still are, by ring stage. 0 = none.
+  // People are never part of this, so you always get a real fight.
+  function brCalm() {
+    if (mode !== 'br' || !zone) return 0;
+    return [1, 1, 0.7, 0.4][zone.phase] || 0;
+  }
   function damage(e, amount, fromId, ang, gun) {
     if (!e.alive) return;
     var hitBy = ents[fromId];
+    if (hitBy && hitBy.bot && e.bot) amount *= 1 - brCalm() * 0.8;   // early fights between bots drag on
     if (hitBy && hitBy.bot && hitBy !== e) botHits++;
     if (hitBy && hitBy.bot && e === player) botHitsOnYou++;
     if (mode === 'tut' && e.dummy && hitBy && hitBy.local) tut.hits = (tut.hits || 0) + 1;
@@ -3278,14 +3285,14 @@
         if (o !== e.target && !inCone(e, o.x, o.y, FOV_HALF + 0.15)) continue;
         // ...but nobody shares a room politely. Later on, this close is always a
         // fight; in the first circle, only if they are right on top of you.
-        if (mode === 'br' && o !== e.target && d >= (zone && zone.phase === 0 && !o.local ? 70 : 170)) {
+        if (mode === 'br' && o !== e.target && d >= (brCalm() >= 0.7 && !o.local ? 40 : 170)) {
           if ((e.skip[o.id] || 0) > matchTime) continue;          // already let them go
           if (e.skip[o.id] === undefined || e.skip[o.id] <= matchTime) {
             // early on most people avoid a fight; later it is kill or be killed.
             // Through the whole first circle, bots mostly leave other bots be
             // (a person is still fair game, so you get your fights).
-            var calm = zone && zone.phase === 0 && !o.local;
-            var takeIt = Math.random() < (calm ? 0.05 : (matchTime < 75 ? 0.3 : 0.62));
+            var calmth = o.local ? 0 : brCalm(), calm = calmth > 0;
+            var takeIt = Math.random() < (calm ? 0.62 - 0.6 * calmth : (matchTime < 75 ? 0.3 : 0.62));
             if (!takeIt) {
               e.skip[o.id] = matchTime + (calm ? rr(10, 18) : rr(4, 8));
               // letting them go means moving on, not standing there together
@@ -3383,8 +3390,11 @@
     if (outside) {
       speed = w ? 232 : 254;
       if (!e.path || e.repathT <= 0) {
-        pathTo(e, zgx + ((e.x - zgx) / (zd || 1)) * zgr * 0.45,
-                  zgy + ((e.y - zgy) / (zd || 1)) * zgr * 0.45, 2.2);
+        // just inside the edge, not halfway to the middle: everybody heading for
+        // the centre is what turned a big map into one small crowded arena
+        var zin = zgr * (brCalm() > 0 ? 0.82 : 0.6);
+        pathTo(e, zgx + ((e.x - zgx) / (zd || 1)) * zin,
+                  zgy + ((e.y - zgy) / (zd || 1)) * zin, 2.2);
       }
       followPath(e, dt, speed);
       footstep(e, dt, true);
@@ -4062,8 +4072,8 @@
           // In battle royale, a distant firefight is usually someone else's
           // problem - most bots keep looting instead of all piling in.
           // Early on (the first circle) nearly all of them do: loot first, fight later.
-          var early = mode === 'br' && zone && zone.phase === 0;
-          var shrug = mode === 'br' && s.kind === 'shot' && d > (early ? 260 : 450) && Math.random() < (early ? 0.95 : 0.68);
+          var early = brCalm() >= 0.7;
+          var shrug = mode === 'br' && s.kind === 'shot' && d > (early ? 120 : 450) && Math.random() < (early ? 0.97 : 0.68);
           // and another bot's footsteps are not worth chasing yet
           if (early && s.kind !== 'shot' && d > 140 && ents[s.owner] && ents[s.owner].bot) shrug = true;
           if (!e.target && !shrug) {
