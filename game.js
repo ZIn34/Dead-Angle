@@ -56,14 +56,16 @@
   ];
 
   // Zone radii are fractions of the map's short side, so every map closes well.
+  // About ten minutes from landing to the last circle: long early waits to loot
+  // and roam, then each step comes a little sooner than the one before.
   var PHASES = [
-    { wait: 26, shrink: 16, f: 0.44, dps: 2 },
-    { wait: 17, shrink: 14, f: 0.31, dps: 3 },
-    { wait: 15, shrink: 12, f: 0.21, dps: 5 },
-    { wait: 13, shrink: 11, f: 0.14, dps: 7 },
-    { wait: 11, shrink: 10, f: 0.085, dps: 10 },
-    { wait: 10, shrink: 9,  f: 0.045, dps: 14 },
-    { wait: 9,  shrink: 9,  f: 0.020, dps: 20 }
+    { wait: 80, shrink: 50, f: 0.44, dps: 2 },
+    { wait: 60, shrink: 45, f: 0.31, dps: 3 },
+    { wait: 55, shrink: 40, f: 0.21, dps: 5 },
+    { wait: 50, shrink: 35, f: 0.14, dps: 7 },
+    { wait: 45, shrink: 30, f: 0.085, dps: 10 },
+    { wait: 40, shrink: 25, f: 0.045, dps: 14 },
+    { wait: 35, shrink: 20, f: 0.020, dps: 20 }
   ];
 
   var MODES = {
@@ -96,8 +98,8 @@
     zomb: 'A few turn at the start and more keep coming, faster as the clock runs down. The infected carry nothing and cannot shoot - they are faster than you, they find you without needing to see you, and a hit puts you on their side. Survive the clock and the living win; lose the last human and it is over.',
     sect: 'Three sectors, eight a side. Outnumber the other team inside one and it flips to you; every sector you hold pays a point a second, first to a hundred and fifty. Holding all three is loud, obvious work - they will hear exactly where you are.',
     ctf: 'Two flags, five a side, first to three captures. Your own flag has to be home for a capture to count. Carrying the enemy flag makes you ring out across the map every second - taking it is the easy part.',
-    war: 'Twenty fighters, ten a side, first to seventy-five. A big map and constant contact - you will rarely be more than a few seconds from a firefight, and the ring of a shot is the only warning you get.',
-    team: 'Five against five, everyone respawns, first side to thirty eliminations. Your squad wears cool colours and theirs wears warm - but in the dark you will hear them long before you can tell.'
+    war: 'Thirty fighters, fifteen a side, first to one hundred. A big map and constant contact - you will rarely be more than a few seconds from a firefight, and the ring of a shot is the only warning you get.',
+    team: 'Eight against eight, everyone respawns, first side to forty eliminations. Your squad wears cool colours and theirs wears warm - but in the dark you will hear them long before you can tell.'
   };
 
   // ---------------------------------------------------------------- dom
@@ -1435,7 +1437,7 @@
   // The drop plane: a straight run across the map. Everyone rides it at the
   // start of a battle royale and bails out somewhere along the way.
   var plane = null;
-  var PLANE_SPEED = 360, GLIDE_SPEED = 235, CHUTE_TIME = 3.2;
+  var PLANE_SPEED = 720, GLIDE_SPEED = 235, CHUTE_TIME = 3.2;
   var VX = 0, VY = 0, VW = 0, VH = 0;       // the viewport being drawn into
   // two people on one screen, on opposite sides
   function splitVs() { return splitOn && locals.length > 1 && locals[0].team !== locals[1].team; }
@@ -1474,6 +1476,7 @@
   var result = null, overCause = '';
   var lastWinner = null;              // who closed out a free-for-all
   var dmgMarks = [], shake = 0;
+  var countT = 0, COUNT_FROM = 3;     // the 3, 2, 1 before a match; nothing moves until it ends
   var cam = { x: 0, y: 0 };
   var mouse = { sx: 0, sy: 0, wx: 0, wy: 0, down: false };
   var keys = {};
@@ -1600,6 +1603,7 @@
     }
     standing.forEach(function (e) { e.tourBye = false; });
     tourSeed(standing);
+    countT = COUNT_FROM;                          // each round of the bracket is a match
   }
   function isZombie(e) { return !!(MODE.zombies && e.team === 1); }
   // Which of the two carried guns suits this range: shotguns fall off hard,
@@ -1699,6 +1703,7 @@
     for (var i = 0; i < loot.length; i++) {
       var it = loot[i];
       if (it.type !== type) continue;
+      if (e.lootBad && e.lootBad.indexOf(it) >= 0) continue;   // could not get to that one
       var dx = it.x - e.x, dy = it.y - e.y, d2 = dx * dx + dy * dy;
       if (d2 < bestD) { bestD = d2; best = it; }
     }
@@ -1732,6 +1737,22 @@
   }
   function pickRespawnTile(e) {
     var best = null, bestScore = -1e9;
+    // Capture the flag: you always come back at your own flag
+    if (MODE.ctf && flags[e.team]) {
+      var fl = flags[e.team], fx = Math.floor(fl.hx / TILE), fy = Math.floor(fl.hy / TILE);
+      for (var k = 0; k < floorTiles.length; k++) {
+        var ft = floorTiles[k], ddx = ft.x - fx, ddy = ft.y - fy, dd = ddx * ddx + ddy * ddy;
+        if (dd < 2 || dd > 36 || !lineClear(fl.hx, fl.hy, ft.x * TILE + TILE / 2, ft.y * TILE + TILE / 2)) continue;
+        var fs = -dd + Math.random() * 12;          // close to the stand, a little spread
+        if (fs > bestScore) { bestScore = fs; best = ft; }
+      }
+      // a cramped stand with nothing in clear view: the nearest open floor instead
+      if (!best) for (k = 0; k < floorTiles.length; k++) {
+        ft = floorTiles[k]; ddx = ft.x - fx; ddy = ft.y - fy; dd = ddx * ddx + ddy * ddy;
+        if (dd >= 2 && -dd > bestScore) { bestScore = -dd; best = ft; }
+      }
+      if (best) return best;
+    }
     for (var i = 0; i < 48; i++) {
       var t = floorTiles[rnd(floorTiles.length)];
       var wx = t.x * TILE, wy = t.y * TILE, minD = 1e9, friend = 1e9;
@@ -1823,8 +1844,7 @@
       e.slots = [{ key: 'rifle', ammo: WEAPONS.rifle.mag }, { key: 'pistol', ammo: WEAPONS.pistol.mag }];
       e.slot = 0; e.reserve = 120; e.meds = 1; e.nades = 2; e.smokes = 1;
     } else {
-      // battle royale: everyone lands with a pistol, so the first fight comes quickly
-      e.slots = [{ key: 'pistol', ammo: WEAPONS.pistol.mag }, null]; e.slot = 0; e.reserve = START_RESERVE; e.meds = 0; e.nades = 0; e.smokes = 0;
+      e.slots = [null, null]; e.slot = 0; e.reserve = START_RESERVE; e.meds = 0; e.nades = 0; e.smokes = 0;
     }
   }
   function placeEnt(e, tile) {
@@ -1988,6 +2008,7 @@
     $('online').hidden = true; $('account').hidden = true; $('friends').hidden = true;
     if ($('chat') && !$('chat').hidden) closeChat(), $('friends').hidden = true;
     state = 'play';
+    countT = mode === 'tut' ? 0 : COUNT_FROM;
     syncHud();
     cgGame('gameplayStart'); cgRoom();
     if (netRole === 'host') for (var gs = 0; gs < netGuests.length; gs++) if (netGuests[gs].ent) netSendTo(netGuests[gs], startMsg(netGuests[gs]));
@@ -2030,11 +2051,44 @@
       e.landX = clamp(e.x - plane.dy * side + plane.dx * ahead, TILE * 3, WORLD_W - TILE * 3);
       e.landY = clamp(e.y + plane.dx * side + plane.dy * ahead, TILE * 3, WORLD_H - TILE * 3);
       if (zone) {
+        // In battle royale the bots fan out over the whole circle rather than
+        // all landing along the one stretch of flight path - spread out, the
+        // first fights come one at a time instead of all at once.
+        if (mode === 'br') {
+          var mate = null, lq, lm;
+          for (lq = 0; squad > 1 && lq < ents.length; lq++) {
+            lm = ents[lq];
+            if (lm !== e && lm.team === e.team && lm.alive && lm.air === 'chute' && lm.landX !== undefined) mate = lm;
+          }
+          if (mate) {                                  // a squad still lands together
+            e.landX = clamp(mate.landX + rr(-60, 60), TILE * 3, WORLD_W - TILE * 3);
+            e.landY = clamp(mate.landY + rr(-60, 60), TILE * 3, WORLD_H - TILE * 3);
+          } else {
+            // of several random spots, take the one furthest from everyone else's
+            var lbest = -1;
+            for (var lc = 0; lc < 14; lc++) {
+              var la = Math.random() * Math.PI * 2, lr = Math.sqrt(Math.random()) * zone.r * 0.8;
+              var lx = clamp(zone.cx + Math.cos(la) * lr, TILE * 3, WORLD_W - TILE * 3);
+              var ly = clamp(zone.cy + Math.sin(la) * lr, TILE * 3, WORLD_H - TILE * 3);
+              var lnear = 1e9;
+              for (lq = 0; lq < ents.length; lq++) {
+                lm = ents[lq];
+                if (lm === e || !lm.alive || lm.air === 'plane') continue;
+                var lox = lm.air === 'chute' && lm.bot ? lm.landX : lm.x, loy = lm.air === 'chute' && lm.bot ? lm.landY : lm.y;
+                lnear = Math.min(lnear, Math.sqrt((lx - lox) * (lx - lox) + (ly - loy) * (ly - loy)));
+              }
+              if (lnear > lbest) { lbest = lnear; e.landX = lx; e.landY = ly; }
+            }
+          }
+        }
         // pull the spot inside the circle (with room to spare)
         var lzx = e.landX - zone.cx, lzy = e.landY - zone.cy, lzd = Math.sqrt(lzx * lzx + lzy * lzy) || 1;
         var safeR = zone.r * 0.8;
         if (lzd > safeR) { e.landX = zone.cx + lzx / lzd * safeR; e.landY = zone.cy + lzy / lzd * safeR; }
       }
+      // a far spot takes a longer glide
+      var gd = Math.sqrt((e.landX - e.x) * (e.landX - e.x) + (e.landY - e.y) * (e.landY - e.y));
+      e.chuteT = clamp(gd / GLIDE_SPEED + 0.4, CHUTE_TIME, 16);
     }
     if (e.local) audioEmit(e.x, e.y, PICK_SND, e.id);
     // a partner bot bails out right behind you
@@ -2095,7 +2149,7 @@
             e.ang = Math.atan2(gy, gx);
           }
         }
-        if (e.airT >= CHUTE_TIME) land(e);
+        if (e.airT >= (e.bot && e.chuteT ? e.chuteT : CHUTE_TIME)) land(e);
       }
     }
     plane.riders = riders;
@@ -2109,8 +2163,8 @@
   // Your own hands in the air: jump from the plane, then steer the chute.
   // the door opens a few seconds in, once the plane is over the island
   var JUMP_AFTER = 2;
-  // everyone still aboard is tipped out a few seconds after the door opens
-  function dropDeadline() { return Math.min(plane.dur * 0.93, JUMP_AFTER + 5); }
+  // everyone still aboard is tipped out just before the plane leaves the map
+  function dropDeadline() { return plane.dur * 0.93; }
   function jumpOpen() { return !!plane && plane.t >= JUMP_AFTER && !!plane.overLand; }
   function airControl(e, I, dt) {
     if (e.air === 'plane') {
@@ -2577,7 +2631,7 @@
       bullets.push({
         x: e.x + Math.cos(ang) * muzzle, y: e.y + Math.sin(ang) * muzzle,
         vx: Math.cos(ang) * w.speed, vy: Math.sin(ang) * w.speed,
-        owner: e.id, dmg: w.dmg * (e.bot ? DIFF[difficulty].dmg : 1), life: 1.25
+        owner: e.id, dmg: w.dmg * (e.bot ? DIFF[difficulty].dmg : 1), life: 1.25, gun: slot.key
       });
     }
     slot.ammo--;
@@ -2822,9 +2876,17 @@
     e.meds--; e.useT = 1.6;
   }
 
-  function damage(e, amount, fromId, ang) {
+  var SNIPER_BLEED = { rate: 2, total: 30 };   // a sniper wound kills if left alone
+  // Battle royale among bots: how calm things still are, by ring stage. 0 = none.
+  // People are never part of this, so you always get a real fight.
+  function brCalm() {
+    if (mode !== 'br' || !zone) return 0;
+    return [1, 1, 0.7, 0.4][zone.phase] || 0;
+  }
+  function damage(e, amount, fromId, ang, gun) {
     if (!e.alive) return;
     var hitBy = ents[fromId];
+    if (hitBy && hitBy.bot && e.bot) amount *= 1 - brCalm() * 0.8;   // early fights between bots drag on
     if (hitBy && hitBy.bot && hitBy !== e) botHits++;
     if (hitBy && hitBy.bot && e === player) botHitsOnYou++;
     if (mode === 'tut' && e.dummy && hitBy && hitBy.local) tut.hits = (tut.hits || 0) + 1;
@@ -2833,11 +2895,15 @@
     e.useT = 0;
     e.hitAt = performance.now();
     if (hitBy && hitBy !== e && hitBy.local) { hitBy.hmAt = e.hitAt; hitBy.hmKill = e.hp <= 0; }
-    // shot down to half or worse: bleeding until a stim closes it up
-    if (e.hp > 0 && e.hp <= 50 && !isZombie(e) && hitBy && hitBy !== e && !e.down) {
+    // shot down to half or worse: bleeding until a stim closes it up.
+    // A sniper round always opens a wound, and a worse one: 2 HP a second, 30 HP.
+    var snipe = gun === 'rifle';
+    if (e.hp > 0 && (e.hp <= 50 || snipe) && !isZombie(e) && hitBy && hitBy !== e && !e.down) {
       if (!e.bleeding && e.local) feed('<b>BLEEDING</b> - use a stim', true);
+      if (!e.bleeding) { e.bleedRate = 1; e.bleedLeft = 0; }   // a fresh wound
       e.bleeding = true; e.bleedBy = fromId;
-      e.bleedLeft = 20;                         // a wound costs at most 20 HP
+      if (snipe) { e.bleedRate = Math.max(e.bleedRate || 1, SNIPER_BLEED.rate); e.bleedLeft = Math.max(e.bleedLeft || 0, SNIPER_BLEED.total); }
+      else if (!(e.bleedLeft > 20)) e.bleedLeft = 20;   // a wound costs at most 20 HP
     }
     if (e.bot) { e.flinch = 0.35; if (e.aimOff !== undefined) e.aimOff += rr(-0.06, 0.06); }
     bleed(e.x, e.y, ang, amount, false, bloodOf(e));
@@ -3217,12 +3283,29 @@
         }
         if (d >= reach2 || !sightClear(e.x, e.y, o.x, o.y)) continue;
         if (o !== e.target && !inCone(e, o.x, o.y, FOV_HALF + 0.15)) continue;
-        if (mode === 'br' && o !== e.target) {
+        // ...but nobody shares a room politely. Later on, this close is always a
+        // fight; in the first circle, only if they are right on top of you.
+        if (mode === 'br' && o !== e.target && d >= (brCalm() >= 0.7 && !o.local ? 40 : 170)) {
           if ((e.skip[o.id] || 0) > matchTime) continue;          // already let them go
           if (e.skip[o.id] === undefined || e.skip[o.id] <= matchTime) {
-            // early on most people avoid a fight; later it is kill or be killed
-            var takeIt = Math.random() < (matchTime < 75 ? 0.3 : 0.62);
-            if (!takeIt) { e.skip[o.id] = matchTime + rr(4, 8); continue; }
+            // early on most people avoid a fight; later it is kill or be killed.
+            // Through the whole first circle, bots mostly leave other bots be
+            // (a person is still fair game, so you get your fights).
+            var calmth = o.local ? 0 : brCalm(), calm = calmth > 0;
+            var takeIt = Math.random() < (calm ? 0.62 - 0.6 * calmth : (matchTime < 75 ? 0.3 : 0.62));
+            if (!takeIt) {
+              e.skip[o.id] = matchTime + (calm ? rr(10, 18) : rr(4, 8));
+              // letting them go means moving on, not standing there together
+              if (calm && d < 340) {
+                var ml = 0, mv = null;
+                for (var mt = 0; mt < 6; mt++) {
+                  var mc = floorTiles[rnd(floorTiles.length)], mdd = Math.abs(mc.x * TILE - o.x) + Math.abs(mc.y * TILE - o.y);
+                  if (Math.abs(mc.x * TILE - e.x) + Math.abs(mc.y * TILE - e.y) < 1100 && mdd > ml) { ml = mdd; mv = mc; }
+                }
+                if (mv) { pathTo(e, mv.x * TILE, mv.y * TILE, 3.5); }
+              }
+              continue;
+            }
             e.skip[o.id] = -1;                                    // decided: fight
           }
         }
@@ -3307,8 +3390,11 @@
     if (outside) {
       speed = w ? 232 : 254;
       if (!e.path || e.repathT <= 0) {
-        pathTo(e, zgx + ((e.x - zgx) / (zd || 1)) * zgr * 0.45,
-                  zgy + ((e.y - zgy) / (zd || 1)) * zgr * 0.45, 2.2);
+        // just inside the edge, not halfway to the middle: everybody heading for
+        // the centre is what turned a big map into one small crowded arena
+        var zin = zgr * (brCalm() > 0 ? 0.82 : 0.6);
+        pathTo(e, zgx + ((e.x - zgx) / (zd || 1)) * zin,
+                  zgy + ((e.y - zgy) / (zd || 1)) * zin, 2.2);
       }
       followPath(e, dt, speed);
       footstep(e, dt, true);
@@ -3378,6 +3464,13 @@
         else { var rt = floorTiles[rnd(floorTiles.length)]; pathTo(e, rt.x * TILE, rt.y * TILE, 3.0); }
       }
       if (followPath(e, dt, speed)) footstep(e, dt, false);
+      // not getting anywhere: give up on that item and go somewhere else
+      if (Math.abs(e.x - (e.dryX || 0)) + Math.abs(e.y - (e.dryY || 0)) > 14) { e.dryX = e.x; e.dryY = e.y; e.dryT = 0; }
+      else if ((e.dryT = (e.dryT || 0) + dt) > 1.5) {
+        e.dryT = 0;
+        if (e.lootGoal) (e.lootBad = e.lootBad || []).push(e.lootGoal);
+        e.lootGoal = null; e.repathT = 0;
+      }
     } else if (e.target && e.reactT <= 0 && mode !== 'br' && !sightClear(e.x, e.y, e.target.x, e.target.y)) {
       // They ducked behind something. Strafing on the spot never gets the
       // shot back - push to where they were last seen and take the corner.
@@ -3952,7 +4045,7 @@
           var dx = e.x - b.x, dy = e.y - b.y;
           if (dx * dx + dy * dy < (e.r + 3) * (e.r + 3)) {
             if (onHere(ents[b.owner])) hits++;
-            damage(e, b.dmg, b.owner, Math.atan2(b.vy, b.vx));
+            damage(e, b.dmg, b.owner, Math.atan2(b.vy, b.vx), b.gun);
             dead = true; break;
           }
         }
@@ -3978,7 +4071,11 @@
           s.heard[e.id] = 1;
           // In battle royale, a distant firefight is usually someone else's
           // problem - most bots keep looting instead of all piling in.
-          var shrug = mode === 'br' && s.kind === 'shot' && d > 450 && Math.random() < 0.68;
+          // Early on (the first circle) nearly all of them do: loot first, fight later.
+          var early = brCalm() >= 0.7;
+          var shrug = mode === 'br' && s.kind === 'shot' && d > (early ? 120 : 450) && Math.random() < (early ? 0.97 : 0.68);
+          // and another bot's footsteps are not worth chasing yet
+          if (early && s.kind !== 'shot' && d > 140 && ents[s.owner] && ents[s.owner].bot) shrug = true;
           if (!e.target && !shrug) {
             // sharper ears place the noise more precisely
             var err = 60 * (1.6 - ear);
@@ -4127,9 +4224,9 @@
       var bl = ents[i];
       if (!bl.alive || !bl.bleeding || bl.down || bl.air) continue;
       if (godMode && bl === player) continue;
-      var bd = Math.min(1 * dt, bl.bleedLeft || 0);    // 1 HP a second
+      var bd = Math.min((bl.bleedRate || 1) * dt, bl.bleedLeft || 0);    // 1 HP a second; a sniper wound, 2
       bl.hp -= bd; bl.bleedLeft = (bl.bleedLeft || 0) - bd;
-      if (bl.bleedLeft <= 0 && bl.hp > 0) { bl.bleeding = false; continue; }
+      if (bl.bleedLeft <= 0 && bl.hp > 0) { bl.bleeding = false; bl.bleedRate = 1; continue; }
       if (bl.hp <= 0) { bl.hp = 0; bl.bleeding = false; hitCause = 'bleed'; kill(bl, ents[bl.bleedBy] && ents[bl.bleedBy] !== bl ? bl.bleedBy : -1); hitCause = 'gun'; }
     }
     pingTick(dt);
@@ -5327,6 +5424,7 @@
     renderDowned();
     renderPrompt();
     renderDamage();
+    renderCountdown();
     if (touchMode && !splitOn) renderSticks();
   }
 
@@ -6294,6 +6392,27 @@
     return true;
   }
 
+  function renderCountdown() {
+    if (noOverlay || countT <= 0 || state === 'over') return;
+    var n = Math.ceil(countT), k = countT - Math.floor(countT);   // each number swells then settles
+    ctx.save();
+    ctx.fillStyle = 'rgba(4,6,10,.45)';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var S = Math.min(cw, ch);
+    ctx.font = '400 ' + Math.round(S * 0.28 * (0.9 + 0.25 * (k === 0 ? 1 : k))) + 'px "Russo One", "Chakra Petch", sans-serif';
+    ctx.lineWidth = Math.max(6, S * 0.012); ctx.strokeStyle = '#0d0f12'; ctx.lineJoin = 'round';
+    ctx.strokeText(String(n), cw / 2, ch * 0.46);
+    ctx.fillStyle = '#f2bd1d';
+    ctx.fillText(String(n), cw / 2, ch * 0.46);
+    ctx.font = '400 ' + Math.max(13, Math.round(S * 0.03)) + 'px "Russo One", "Chakra Petch", sans-serif';
+    ctx.fillStyle = '#f1e7d0';
+    ctx.lineWidth = 4;
+    ctx.strokeText('GET READY', cw / 2, ch * 0.66);
+    ctx.fillText('GET READY', cw / 2, ch * 0.66);
+    ctx.restore();
+  }
+
   function renderDamage() {
     if (noOverlay) return;
     if (player.alive && player.bleeding && !player.down) {
@@ -6694,6 +6813,11 @@
     kbmLast = performance.now();
     var k = keyOf(e);
     keys[k] = true;
+    // nothing happens during the countdown, except pausing
+    if (state === 'play' && countT > 0 && k !== 'p' && k !== 'escape') {
+      if (['w', 'a', 's', 'd', ' ', 'tab', 'arrowup', 'arrowdown'].indexOf(k) >= 0) e.preventDefault();
+      return;
+    }
     if (netRole && !cgNoChat() && (state === 'play') && (k === 't' || k === 'enter') && $('igChat').hidden && !(player && player.invOpen)) { e.preventDefault(); openIgChat(); return; }
     if (netGuest && state === 'play') {
       var GB = { 'e': PAD.pickup, ' ': PAD.jump, 'v': PAD.melee, 'x': PAD.giveup, 'r': PAD.reload, 'f': PAD.stim,
@@ -6743,7 +6867,7 @@
     if (state === 'play' && !netRole) pause();      // a friend online keeps playing
   });
 
-  var MODE_LABEL = { tut: 'Tutorial', br: 'Battle royale', duel: '1v1', gun: 'Gun game', team: 'Teams 5v5', war: 'War 10v10', ctf: 'Capture the flag', sect: 'Sector capture', zomb: 'Infection', tour: '1v1 tourney' };
+  var MODE_LABEL = { tut: 'Tutorial', br: 'Battle royale', duel: '1v1', gun: 'Gun game', team: 'Teams 8v8', war: 'War 15v15', ctf: 'Capture the flag', sect: 'Sector capture', zomb: 'Infection', tour: '1v1 tourney' };
   function pause() {
     cgGame('gameplayStop');
     if (netGuest) {                                   // the host's match keeps going
@@ -7374,7 +7498,7 @@
     netSendT = 1 / sendHz();
     // everything everyone sees, serialised once
     var shared = netStr({
-      t: 's', hold: state === 'paused',
+      t: 's', hold: state === 'paused', cd: +countT.toFixed(2),
       fl: flags.map(function (f) {
         return { team: f.team, hx: f.hx, hy: f.hy, x: f.x, y: f.y, home: f.home, ping: f.ping, carrier: f.carrier ? f.carrier.id : -1 };
       }),
@@ -7729,6 +7853,7 @@
     if (m.co) corpses = m.co.map(unpackMark);
     if (m.defs) for (var k in m.defs) netDefs[k] = m.defs[k];
     netHostHeld = !!m.hold;
+    if (m.cd !== undefined) countT = m.cd;
     var ev = m.ev || [];
     for (i = 0; i < ev.length; i++) {
       var q = ev[i];
@@ -8627,11 +8752,20 @@
 
   // ---------------------------------------------------------------- loop
   var last = performance.now();
+  function tickCountdown(dt) {
+    var was = Math.ceil(countT);
+    countT = Math.max(0, countT - dt);
+    if (player && Math.ceil(countT) !== was) audioEmit(player.x, player.y, PICK_SND, player.id);
+    // the camera still has to find you, and the mouse still aims
+    if (player) { cam.x = player.x; cam.y = player.y; }
+    updateMouseWorld();
+  }
   function frame(now) {
     var dt = Math.min((now - last) / 1000, 0.05);
     last = now;
     if (state === 'play') {
-      if (netGuest) guestTick(Math.max(dt, 0.0001));
+      if (netGuest) { guestTick(Math.max(dt, 0.0001)); if (countT > 0) countT = Math.max(0, countT - dt); }
+      else if (countT > 0) tickCountdown(dt);
       else update(Math.max(dt, 0.0001));
       if (netGuest && netGuestPaused) uiPad(dt);
     }
